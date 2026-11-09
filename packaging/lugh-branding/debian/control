@@ -1,0 +1,22 @@
+Source: lugh-branding
+Section: misc
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: config-package-dev (>= 5.0), debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-branding
+Architecture: all
+Depends: base-files (>= 13), grub-common, plymouth, plymouth-label, ${misc:Depends}
+Provides: ${diverted-files}
+Conflicts: ${diverted-files}
+Description: Lugh OS identity and boot look
+ Branding for Lugh OS, a desktop system based on Debian:
+  - os-release that names the system Lugh (ID_LIKE=debian), plus
+    /etc/issue and /etc/motd; Debian's files are diverted, not overwritten;
+  - the Lugh GRUB theme, enabled with GRUB_DISTRIBUTOR, GRUB_THEME and a
+    "quiet splash" kernel command line in /etc/default/grub.d/lugh.cfg;
+  - the Lugh Plymouth boot splash (logo, progress line, passphrase prompt),
+    made the default theme on installation;
+  - the Lugh logo, wordmark and lugh-logo application icon.
