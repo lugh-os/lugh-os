@@ -1,0 +1,19 @@
+#!/bin/sh
+# Apply Lugh branding inside the live chroot: make "lugh" the Plymouth theme
+# and rebuild the initramfs so the splash is in it. lugh-branding (and its
+# Plymouth theme) comes from the local Lugh apt repo via package-lists/lugh.
+set -e
+
+THEME=lugh
+
+if [ -d "/usr/share/plymouth/themes/${THEME}" ]; then
+	echo "I: lugh-branding: setting Plymouth theme '${THEME}'"
+	plymouth-set-default-theme "${THEME}"
+else
+	echo "E: lugh-branding: /usr/share/plymouth/themes/${THEME} not found;" \
+		"is lugh-branding (or lugh-plymouth-theme) installed?" >&2
+	exit 1
+fi
+
+# Rebuild every installed kernel's initramfs with the theme in it.
+update-initramfs -u -k all
