@@ -127,3 +127,8 @@ Status values: **Accepted**, **Proposed** (not yet confirmed), **Superseded by A
 **Status:** Accepted, 2026-11-08
 **Decision:** Files = `pcmanfm-qt`, terminal = `foot`, images = `qimgv`, PDF = `qpdfview`, archives = `lxqt-archiver`, text = `featherpad`, calculator = `qalculate-qt`. They're chosen because they match the Qt stack and stay light (no full KDE Frameworks or GNOME stack).
 **Consequences:** Low RAM and a consistent toolkit. Open question: build **Lugh Files** (QML) later, because Shield and Bridge integrate best with a file manager we control.
+
+## ADR-025: Founder logo adopted; logo amber kept separate from the UI accent
+**Status:** Proposed, 2026-11-09
+**Decision:** The founder's mark (a charcoal "L" `#2A2420` with an amber sun `#EE9A2E`) replaces the "lugh" text placeholder. The art keeps its own colors exactly. The UI `accent` token stays `#E8962E`, because its AA contrast pairs are already measured. Logo files live in `branding/logo/`, and a dark-background variant (light "L" `#EDEBE6`) is used on dark surfaces.
+**Open:** the founder may prefer to unify both on one amber. If so, change it in one place and re-run `scripts/render-brand-assets.sh`.
