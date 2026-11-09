@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Lugh
+Description=Lugh boot splash: centered logo and a thin amber progress line on a light background.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/lugh
+ScriptFile=/usr/share/plymouth/themes/lugh/lugh.script
