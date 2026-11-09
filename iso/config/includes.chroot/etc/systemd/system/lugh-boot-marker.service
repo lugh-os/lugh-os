@@ -1,0 +1,14 @@
+# Live ISO only: prints a marker on the first serial port once the system
+# reached multi-user.target. scripts/test-boot.sh waits for "LUGH-BOOT-OK".
+[Unit]
+Description=Lugh boot marker on the serial console
+After=multi-user.target
+ConditionPathExists=/dev/ttyS0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo "LUGH-BOOT-OK $(grep "^VERSION_ID=" /etc/os-release)" > /dev/ttyS0'
+
+[Install]
+WantedBy=multi-user.target
