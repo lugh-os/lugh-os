@@ -1,0 +1,26 @@
+# Lugh build environment: Debian 13 "trixie" with everything needed to build
+# Lugh .deb packages, publish the local apt repo and build the live ISO.
+#
+# Built and used through scripts/lib/container.sh (podman, or docker as a
+# fallback). The image is tagged localhost/lugh-build-env:trixie and labelled
+# with the sha256 of this file, so editing it triggers a rebuild.
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      live-build debootstrap \
+      xorriso squashfs-tools mtools dosfstools \
+      grub-efi-amd64-bin grub-pc-bin grub-efi-amd64-signed shim-signed \
+      syslinux isolinux syslinux-common \
+      build-essential debhelper devscripts fakeroot lintian config-package-dev \
+      aptly gnupg \
+      librsvg2-bin python3 \
+      ca-certificates curl rsync \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
