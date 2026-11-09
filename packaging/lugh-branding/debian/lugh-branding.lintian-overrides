@@ -1,0 +1,2 @@
+# GRUB theme definition, not documentation.
+package-contains-documentation-outside-usr-share-doc [usr/share/grub/themes/lugh/theme.txt]
