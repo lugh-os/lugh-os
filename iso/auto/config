@@ -1,0 +1,60 @@
+#!/bin/sh
+# Lugh live-build configuration (Debian 13 "trixie", amd64).
+# Run through `lb config`; scripts/build-iso.sh does this inside the build
+# container. See docs/phases/phase-0-foundation.md §3.
+set -e
+
+MIRROR="${LUGH_DEBIAN_MIRROR:-http://deb.debian.org/debian/}"
+SECURITY_MIRROR="${LUGH_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security/}"
+
+# Notes on the options beyond the phase doc:
+# --firmware-chroot/--firmware-binary false: live-build would otherwise pull
+#   every firmware package in non-free-firmware; we list ours explicitly in
+#   config/package-lists/firmware.list.chroot (keeps the ISO <= 1.2 GB).
+# --cache-stages bootstrap: live-build 20250505 needs cache/bootstrap even
+#   without debian-installer (`lb installer_chroot` copies it unconditionally;
+#   "none" fails there with "cp: cannot stat 'cache/bootstrap'").
+#   scripts/build-iso.sh deletes that root-owned rootfs when the container
+#   exits, so the host-side iso/cache only ever keeps .debs (cache/packages.*).
+# --debootstrap-options --include=ca-certificates: the Mozilla repo is HTTPS
+#   and live-build runs `apt update` with the archives before the package
+#   lists (and so ca-certificates) are installed.
+# Recommends stay on: the image needs user-setup, polkitd, rtkit and
+#   systemd-timesyncd, and the ISO is still well under budget.
+# live-config.*: live user "lugh" (passwordless sudo comes from live-config's
+#   sudo component, so it exists on the live image only), hostname "lugh".
+# console=tty0 console=ttyS0,115200: serial log for the QEMU boot test.
+lb config noauto \
+	--mode debian \
+	--architecture amd64 \
+	--distribution trixie \
+	--archive-areas "main contrib non-free non-free-firmware" \
+	--parent-archive-areas "main contrib non-free non-free-firmware" \
+	--mirror-bootstrap "${MIRROR}" \
+	--mirror-chroot "${MIRROR}" \
+	--mirror-binary "${MIRROR}" \
+	--parent-mirror-bootstrap "${MIRROR}" \
+	--parent-mirror-chroot "${MIRROR}" \
+	--parent-mirror-binary "${MIRROR}" \
+	--mirror-chroot-security "${SECURITY_MIRROR}" \
+	--mirror-binary-security "${SECURITY_MIRROR}" \
+	--parent-mirror-chroot-security "${SECURITY_MIRROR}" \
+	--parent-mirror-binary-security "${SECURITY_MIRROR}" \
+	--security true \
+	--updates true \
+	--linux-flavours amd64 \
+	--binary-images iso-hybrid \
+	--bootloaders "grub-efi,syslinux" \
+	--uefi-secure-boot enable \
+	--debian-installer none \
+	--firmware-chroot false \
+	--firmware-binary false \
+	--cache-stages bootstrap \
+	--debootstrap-options "--include=ca-certificates" \
+	--iso-application "Lugh" \
+	--iso-publisher "Lugh" \
+	--iso-volume "LUGH" \
+	--image-name lugh \
+	--bootappend-live "boot=live components quiet splash live-config.username=lugh live-config.user-fullname=Lugh live-config.hostname=lugh console=tty0 console=ttyS0,115200" \
+	--bootappend-live-failsafe "boot=live components memtest noapic noapm nodma nomce nosmp nosplash vga=788 live-config.username=lugh live-config.user-fullname=Lugh live-config.hostname=lugh console=tty0 console=ttyS0,115200" \
+	"${@}"
