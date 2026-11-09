@@ -1,0 +1,39 @@
+#!/bin/sh
+# lugh-branding postinst: make Lugh the boot splash and refresh the
+# initramfs and GRUB config so the new look is used on the next boot.
+# None of this is fatal: in a chroot (live-build) or a container the tools
+# may be missing or unable to run, and the image build refreshes them later.
+set -e
+
+warn() {
+	echo "lugh-branding: $*" >&2
+}
+
+# The diversions (os-release, issue, motd) are set up by config-package-dev
+# in the debhelper section below.
+
+#DEBHELPER#
+
+if [ "$1" = configure ]; then
+	if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+		# Choose the Lugh splash on first installation only, so an
+		# administrator's later choice survives upgrades.
+		if [ -z "$2" ]; then
+			plymouth-set-default-theme lugh ||
+				warn "could not set the Plymouth theme; run: plymouth-set-default-theme lugh"
+		fi
+		# Theme files live in the initramfs. From a maintainer script,
+		# update-initramfs only activates initramfs-tools' trigger.
+		if [ "$(plymouth-set-default-theme 2>/dev/null || true)" = lugh ] &&
+			command -v update-initramfs >/dev/null 2>&1; then
+			update-initramfs -u ||
+				warn "update-initramfs failed; run: update-initramfs -u"
+		fi
+	fi
+
+	if [ -e /boot/grub/grub.cfg ] && command -v update-grub >/dev/null 2>&1; then
+		update-grub || warn "update-grub failed; run: update-grub"
+	fi
+fi
+
+exit 0
