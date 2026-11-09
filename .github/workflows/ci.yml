@@ -1,0 +1,113 @@
+# Fast checks on every push and pull request: Rust, the cxx-qt toolchain
+# smoke app, QML lint and shell lint. The ISO build lives in iso.yml.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rustup is preinstalled on the runner; this installs the toolchain and
+      # components pinned in rust-toolchain.toml.
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup component add rustfmt clippy
+          rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  hello:
+    name: hello (cxx-qt + qmllint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: debian:trixie
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LANG: C.UTF-8
+    steps:
+      - name: Install Qt 6 and build tools
+        run: |
+          apt-get update
+          apt-get install -y build-essential pkg-config cmake \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-window \
+            qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
+            curl ca-certificates git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install rustup and the pinned toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" toolchain install
+          "$HOME/.cargo/bin/rustup" show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ui/hello
+
+      - name: Build ui/hello
+        env:
+          QMAKE: /usr/lib/qt6/bin/qmake
+        run: cargo build --manifest-path ui/hello/Cargo.toml
+
+      - name: qmllint
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          files=(ui/**/*.qml)
+          if ((${#files[@]} == 0)); then
+            echo "no QML files under ui/; skipping"
+            exit 0
+          fi
+          printf 'linting %s\n' "${files[@]}"
+          /usr/lib/qt6/bin/qmllint "${files[@]}"
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # shellcheck is preinstalled on ubuntu-latest.
+      - name: shellcheck scripts/ and iso/auto/
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          files=(scripts/**/*.sh iso/auto/*)
+          if ((${#files[@]} == 0)); then
+            echo "no shell scripts found"
+            exit 0
+          fi
+          shellcheck --version
+          shellcheck -x "${files[@]}"
