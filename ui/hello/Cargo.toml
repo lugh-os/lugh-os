@@ -1,0 +1,20 @@
+[package]
+name = "lugh-hello"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Phase 0 toolchain smoke app: one QML window backed by a Rust QObject (cxx-qt, Qt 6). Not shipped."
+
+# Standalone project: it needs Qt 6 dev packages, so it stays out of the root
+# workspace (the root Cargo.toml lists it under `exclude`).
+[workspace]
+
+[dependencies]
+cxx = "1.0"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+
+[build-dependencies]
+cxx-qt-build = "0.10"
