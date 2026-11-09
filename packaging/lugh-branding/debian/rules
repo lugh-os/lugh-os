@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+# The source tree has debian/ and a copy of the repo's branding/ next to it
+# (scripts/build-debs.sh). Nothing is compiled: the assets in branding/ are
+# committed, pre-generated files.
+
+%:
+	dh $@ --with config-package
+
+# Files displaced with config-package-dev (debian/lugh-branding.displace) are
+# installed under their ".lugh" name; dh_install cannot rename, so do it here.
+execute_after_dh_install:
+	install -D -m 0644 branding/os-release debian/lugh-branding/usr/lib/os-release.lugh
+	install -D -m 0644 branding/issue debian/lugh-branding/etc/issue.lugh
+	install -D -m 0644 branding/motd debian/lugh-branding/etc/motd.lugh
+	install -D -m 0644 branding/default-grub.cfg debian/lugh-branding/etc/default/grub.d/lugh.cfg
