@@ -1,0 +1,18 @@
+label live-@FLAVOUR@
+	menu label ^Start Lugh
+	menu default
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE@
+
+label live-@FLAVOUR@-safegfx
+	menu label Start Lugh (safe ^graphics)
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE@ nomodeset
+
+label live-@FLAVOUR@-failsafe
+	menu label Start Lugh (^fail-safe mode)
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE_FAILSAFE@
