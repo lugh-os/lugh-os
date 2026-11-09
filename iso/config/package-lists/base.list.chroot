@@ -1,0 +1,15 @@
+linux-image-amd64
+systemd-sysv
+sudo
+locales
+console-setup
+keyboard-configuration
+bash-completion
+less
+nano
+ca-certificates
+curl
+wget
+apt-transport-https
+plymouth
+plymouth-themes
