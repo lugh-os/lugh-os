@@ -1,0 +1,25 @@
+# Toolchain smoke-test image for `make hello`: Debian trixie + Qt 6 dev
+# packages + rustup. Mirrors the `hello` job in .github/workflows/ci.yml.
+# The Rust toolchain itself is installed at run time from rust-toolchain.toml
+# (`rustup toolchain install`) into a named volume, so a toolchain bump does
+# not need an image rebuild.
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    RUSTUP_HOME=/root/.rustup \
+    CARGO_HOME=/root/.cargo \
+    PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential pkg-config cmake \
+      qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+      qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-window \
+      qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
+      curl ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+
+WORKDIR /src
