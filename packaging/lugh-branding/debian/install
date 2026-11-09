@@ -1,0 +1,10 @@
+branding/grub/theme.txt usr/share/grub/themes/lugh/
+branding/grub/*.pf2 usr/share/grub/themes/lugh/
+branding/grub/*.png usr/share/grub/themes/lugh/
+branding/plymouth/lugh/lugh.plymouth usr/share/plymouth/themes/lugh/
+branding/plymouth/lugh/lugh.script usr/share/plymouth/themes/lugh/
+branding/plymouth/lugh/*.png usr/share/plymouth/themes/lugh/
+branding/icons/hicolor usr/share/icons/
+branding/icons/hicolor/256x256/apps/lugh-logo.png usr/share/pixmaps/
+branding/icons/hicolor/scalable/apps/lugh-logo.svg usr/share/pixmaps/
+branding/logo/*.svg usr/share/lugh/branding/logo/
