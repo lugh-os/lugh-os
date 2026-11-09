@@ -1,0 +1,90 @@
+# Lugh GRUB theme (light). Every path is relative to this directory, so the
+# directory can be copied as-is: /usr/share/grub/themes/lugh/ on installed
+# systems, the GRUB theme directory on the live ISO.
+#
+# Fonts (the *.pf2 files here must be loaded with loadfont; grub-mkconfig's
+# 00_header does this for every *.pf2 next to GRUB_THEME):
+#   "Inter Regular 16", "Inter Regular 24", "Inter SemiBold Regular 24"
+# The edit/command-line terminal uses GRUB's "GNU Unifont Regular 16"
+# (unicode.pf2), which a proportional font cannot replace.
+#
+# Colors follow DESIGN-SYSTEM.md (light): bg #F7F6F3, text #1C1B19,
+# text-muted #5F5B54, surface-3 #E4E1DA, accent #E8962E.
+# Regenerate the PNGs and fonts with make-assets.sh.
+
+title-text: ""
+desktop-color: "#F7F6F3"
+
+terminal-font: "GNU Unifont Regular 16"
+terminal-box: "terminal_box_*.png"
+terminal-left: "10%"
+terminal-top: "10%"
+terminal-width: "80%"
+terminal-height: "80%"
+terminal-border: "16"
+
+# Logo: 128 px, above the menu.
++ image {
+  left = 50%-64
+  top = 50%-260
+  width = 128
+  height = 128
+  file = "logo.png"
+}
+
++ boot_menu {
+  left = 50%-320
+  top = 50%-92
+  width = 640
+  height = 40%
+  item_font = "Inter Regular 24"
+  selected_item_font = "Inter SemiBold Regular 24"
+  item_color = "#1C1B19"
+  selected_item_color = "#1C1B19"
+  selected_item_pixmap_style = "select_*.png"
+  item_height = 40
+  item_padding = 16
+  item_spacing = 12
+  icon_width = 0
+  icon_height = 0
+  item_icon_space = 0
+  scrollbar = false
+}
+
+# Countdown text and a thin amber bar for the menu timeout.
++ label {
+  id = "__timeout__"
+  left = 0
+  top = 100%-136
+  width = 100%
+  height = 24
+  align = "center"
+  font = "Inter Regular 16"
+  color = "#5F5B54"
+  text = "Starting in %d s"
+}
+
+# GRUB 2.12 makes every progress bar at least 28 px tall, so the track
+# pixmaps have transparent 12/13 px borders and only a 3 px line shows.
++ progress_bar {
+  id = "__timeout__"
+  left = 50%-120
+  top = 100%-104
+  width = 240
+  height = 28
+  bar_style = "timeout_bar_*.png"
+  highlight_style = "timeout_hl_*.png"
+  highlight_overlay = true
+  show_text = false
+}
+
++ label {
+  left = 0
+  top = 100%-64
+  width = 100%
+  height = 24
+  align = "center"
+  font = "Inter Regular 16"
+  color = "#5F5B54"
+  text = "↑ ↓ to choose  ·  Enter to start  ·  E to edit  ·  C for a command line"
+}
