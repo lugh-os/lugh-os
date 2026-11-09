@@ -1,0 +1,40 @@
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Rust, QML, shell, Python: 4 spaces
+[*.{rs,qml,js,sh,bash,py,cpp,h,hpp}]
+indent_style = space
+indent_size = 4
+
+# Data and docs: 2 spaces
+[*.{yml,yaml,json,toml,md,xml,svg}]
+indent_style = space
+indent_size = 2
+
+# Markdown uses two trailing spaces for hard line breaks
+[*.md]
+trim_trailing_whitespace = false
+
+# Make requires tabs
+[{Makefile,makefile,GNUmakefile,*.mk}]
+indent_style = tab
+indent_size = 8
+
+# debian/rules is a Makefile
+[**/debian/rules]
+indent_style = tab
+indent_size = 8
+
+# The license text is kept verbatim
+[LICENSE]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = unset
