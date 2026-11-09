@@ -1,0 +1,234 @@
+# Lugh boot splash (light). Plymouth script theme.
+#
+# Centered logo, a thin amber progress line under it, a passphrase dialog for
+# cryptsetup, and boot messages near the bottom. Colors follow
+# DESIGN-SYSTEM.md (light): bg #F7F6F3, text #1C1B19, text-muted #5F5B54,
+# surface-3 #E4E1DA, accent #E8962E.
+#
+# HiDPI: on screens 1600 px tall or more, the 256 px logo and the @2x images
+# are used and every size doubles; otherwise the 128 px logo and 1x images.
+# A dark variant (bg #141413) follows later.
+# Images are regenerated with branding/plymouth/make-assets.sh.
+
+#------------------------------------------------------------------ Setup
+
+Window.SetBackgroundTopColor(0.969, 0.965, 0.953);     # #F7F6F3
+Window.SetBackgroundBottomColor(0.969, 0.965, 0.953);
+
+if (Window.GetHeight() >= 1600)
+  {
+    scale = 2;
+    logo.image = Image("logo.png");
+    entry_image = Image("entry@2x.png");
+    bullet_image = Image("bullet@2x.png");
+  }
+else
+  {
+    scale = 1;
+    logo.image = Image("logo-128.png");
+    entry_image = Image("entry.png");
+    bullet_image = Image("bullet.png");
+  }
+
+font = "Sans " + 11 * scale;
+
+# text #1C1B19 and text-muted #5F5B54
+text.r = 0.110; text.g = 0.106; text.b = 0.098;
+muted.r = 0.373; muted.g = 0.357; muted.b = 0.329;
+
+screen.x = Window.GetX();
+screen.y = Window.GetY();
+screen.w = Window.GetWidth();
+screen.h = Window.GetHeight();
+
+# The logo sits a little above the middle of the screen.
+logo.x = screen.x + Math.Int((screen.w - logo.image.GetWidth()) / 2);
+logo.y = screen.y + Math.Int(screen.h * 0.45 - logo.image.GetHeight() / 2);
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetPosition(logo.x, logo.y, 10);
+
+#------------------------------------------------------------------ Progress line
+
+progress.w = 160 * scale;
+progress.h = 3 * scale;
+progress.x = screen.x + Math.Int((screen.w - progress.w) / 2);
+progress.y = logo.y + logo.image.GetHeight() + 48 * scale;
+progress.track = Sprite(Image("progress-track.png").Scale(progress.w, progress.h));
+progress.track.SetPosition(progress.x, progress.y, 10);
+progress.fill_image = Image("progress-fill.png");
+progress.fill = Sprite();
+progress.fill.SetPosition(progress.x, progress.y, 11);
+progress.target = 0;
+progress.shown = 0;
+progress.drawn = -1;
+
+fun progress_visible(visible)
+  {
+    progress.track.SetOpacity(visible);
+    progress.fill.SetOpacity(visible);
+  }
+
+# Shutdown, reboot and the like show the logo only.
+mode = Plymouth.GetMode();
+if (mode != "boot" && mode != "resume" && mode != "updates"
+    && mode != "system-upgrade" && mode != "firmware-upgrade")
+  progress_visible(0);
+
+fun boot_progress_callback(duration, value)
+  {
+    global.progress.target = value;
+  }
+
+fun system_update_callback(value)
+  {
+    # value is a percentage
+    global.progress.target = value / 100;
+  }
+
+# Ease the line toward the reported value so it never jumps.
+fun refresh_callback()
+  {
+    shown = progress.shown + (progress.target - progress.shown) * 0.08;
+    shown = Math.Clamp(shown, 0, 1);
+    global.progress.shown = shown;
+    width = Math.Int(progress.w * shown);
+    if (width != progress.drawn)
+      {
+        global.progress.drawn = width;
+        if (width > 0)
+          progress.fill.SetImage(progress.fill_image.Scale(width, progress.h));
+      }
+  }
+
+Plymouth.SetBootProgressFunction(boot_progress_callback);
+Plymouth.SetSystemUpdateFunction(system_update_callback);
+Plymouth.SetRefreshFunction(refresh_callback);
+
+#------------------------------------------------------------------ Dialog
+
+# Laid out under the logo, in place of the progress line:
+#   prompt text (e.g. "Please unlock disk nvme0n1p3_crypt:")
+#   entry field with bullets
+dialog.visible = 0;
+dialog.y = logo.y + logo.image.GetHeight() + 32 * scale;
+dialog.prompt = Sprite();
+dialog.entry = Sprite(entry_image);
+dialog.entry_x = screen.x + Math.Int((screen.w - entry_image.GetWidth()) / 2);
+dialog.entry_y = dialog.y + 32 * scale;
+dialog.entry.SetPosition(dialog.entry_x, dialog.entry_y, 20);
+dialog.entry.SetOpacity(0);
+dialog.answer = Sprite();
+dialog.answer.SetPosition(dialog.entry_x + 16 * scale, dialog.entry_y, 21);
+dialog.bullet_step = bullet_image.GetWidth() + 6 * scale;
+dialog.max_bullets = Math.Int((entry_image.GetWidth() - 32 * scale) / dialog.bullet_step);
+dialog.bullets = 0;
+
+fun prompt_show(prompt)
+  {
+    if (!prompt)
+      prompt = "";
+    image = Image.Text(prompt, text.r, text.g, text.b, 1, font, "center");
+    dialog.prompt.SetImage(image);
+    dialog.prompt.SetPosition(screen.x + Math.Int((screen.w - image.GetWidth()) / 2), dialog.y, 20);
+    dialog.prompt.SetOpacity(1);
+    dialog.entry.SetOpacity(1);
+    progress_visible(0);
+    global.dialog.visible = 1;
+  }
+
+fun bullets_show(count)
+  {
+    # Hide all bullets that were shown before, then show `count` of them.
+    for (i = 0; i < dialog.bullets; i++)
+      dialog.bullet[i].SetOpacity(0);
+    if (count > dialog.max_bullets)
+      count = dialog.max_bullets;
+    for (i = 0; i < count; i++)
+      {
+        if (!dialog.bullet[i])
+          {
+            global.dialog.bullet[i] = Sprite(bullet_image);
+            dialog.bullet[i].SetPosition(dialog.entry_x + 16 * scale + i * dialog.bullet_step,
+                                         dialog.entry_y + Math.Int((entry_image.GetHeight() - bullet_image.GetHeight()) / 2),
+                                         21);
+          }
+        dialog.bullet[i].SetOpacity(1);
+      }
+    if (count > dialog.bullets)
+      global.dialog.bullets = count;
+  }
+
+fun answer_show(answer)
+  {
+    if (!answer)
+      answer = "";
+    image = Image.Text(answer, text.r, text.g, text.b, 1, font, "left");
+    dialog.answer.SetImage(image);
+    dialog.answer.SetY(dialog.entry_y + Math.Int((entry_image.GetHeight() - image.GetHeight()) / 2));
+    dialog.answer.SetOpacity(1);
+  }
+
+fun display_normal_callback()
+  {
+    if (dialog.visible)
+      {
+        dialog.prompt.SetOpacity(0);
+        dialog.entry.SetOpacity(0);
+        dialog.answer.SetOpacity(0);
+        bullets_show(0);
+        global.dialog.visible = 0;
+        if (mode == "boot" || mode == "resume")
+          progress_visible(1);
+      }
+  }
+
+fun display_password_callback(prompt, bullets)
+  {
+    prompt_show(prompt);
+    dialog.answer.SetOpacity(0);
+    bullets_show(bullets);
+  }
+
+fun display_question_callback(prompt, entry)
+  {
+    prompt_show(prompt);
+    bullets_show(0);
+    answer_show(entry);
+  }
+
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+Plymouth.SetDisplayQuestionFunction(display_question_callback);
+
+#------------------------------------------------------------------ Messages
+
+# One line of muted text near the bottom (fsck notes, "Press Ctrl+C to
+# cancel" and other messages from systemd or plymouth --display-message).
+message.sprite = Sprite();
+message.y = screen.y + screen.h - 64 * scale;
+
+fun display_message_callback(text_value)
+  {
+    image = Image.Text(text_value, muted.r, muted.g, muted.b, 1, font, "center");
+    message.sprite.SetImage(image);
+    message.sprite.SetPosition(screen.x + Math.Int((screen.w - image.GetWidth()) / 2), message.y, 30);
+    message.sprite.SetOpacity(1);
+  }
+
+fun hide_message_callback(text_value)
+  {
+    message.sprite.SetOpacity(0);
+  }
+
+Plymouth.SetDisplayMessageFunction(display_message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+
+#------------------------------------------------------------------ Quit
+
+fun quit_callback()
+  {
+    progress_visible(0);
+    message.sprite.SetOpacity(0);
+  }
+
+Plymouth.SetQuitFunction(quit_callback);
