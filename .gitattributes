@@ -1,0 +1,19 @@
+# Normalize all text to LF in the repo and in checkouts.
+* text=auto eol=lf
+
+# Shell scripts must stay LF even if a tool guesses wrong.
+*.sh       text eol=lf
+Makefile   text eol=lf
+
+# Binary assets: never diff or normalize.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.ico      binary
+*.pf2      binary
+*.otf      binary
+*.ttf      binary
+*.woff2    binary
+*.iso      binary
+*.deb      binary
+*.gpg      binary
