@@ -1,0 +1,4 @@
+#!/bin/sh
+# Enable the serial boot marker used by scripts/test-boot.sh (live ISO only).
+set -e
+systemctl enable lugh-boot-marker.service
