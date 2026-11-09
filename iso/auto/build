@@ -1,0 +1,5 @@
+#!/bin/bash
+# Standard live-build wrapper: build and keep a log (exit status preserved).
+set -e
+set -o pipefail
+lb build noauto "${@}" 2>&1 | tee build.log
