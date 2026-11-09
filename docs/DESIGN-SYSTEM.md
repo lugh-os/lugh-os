@@ -136,7 +136,7 @@ Tabular numerals (`tnum`) are used in Tasks, clocks and anywhere numbers update 
 | Windows Setup icon | ICO | 16–256 |
 | Default wallpapers | PNG/JPEG | 3840×2160 + 2560×1600, light and dark variants |
 
-Until the logo arrives, a neutral placeholder (the word "lugh" set in Inter 600) is used, and it lives only in `branding/placeholder/`.
+The founder's logo is in `branding/logo/` (see ADR-025). Its sun amber `#EE9A2E` is part of the art and is not the UI `accent` token.
 
 ## 10. Accessibility
 
