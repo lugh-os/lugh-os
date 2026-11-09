@@ -1,0 +1,29 @@
+# Build output (ISOs, checksums, OVMF vars, serial logs, debs, local repo)
+/out/
+
+# Rust
+/target/
+**/target/
+
+# QML hello app (CMake build dir)
+ui/hello/build/
+
+# Generated artifacts, wherever they land
+*.iso
+*.deb
+
+# Caches
+.cache/
+
+# Editors and OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+.DS_Store
+Thumbs.db
+*.kate-swp
+.directory
