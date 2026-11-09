@@ -1,0 +1,13 @@
+# Mozilla's APT repo (ADR-011): firefox from packages.mozilla.org, pinned to
+# priority 1000 by /etc/apt/preferences.d/mozilla.
+#
+# Shipped through includes.chroot rather than config/archives/*.list.binary:
+# live-build also writes the *.list.binary sources into the bare bootstrap
+# chroot it uses for `lb installer`, where this key does not exist, and its
+# `apt update` then fails. (Not named mozilla.list: live-build deletes
+# sources.list.d/mozilla.list when it removes config/archives/mozilla.list.chroot.)
+Types: deb
+URIs: https://packages.mozilla.org/apt
+Suites: mozilla
+Components: main
+Signed-By: /etc/apt/keyrings/packages.mozilla.org.asc
