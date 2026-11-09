@@ -1,0 +1,37 @@
+#!/bin/sh
+# lugh-branding postrm: put the default splash back and refresh the
+# initramfs and GRUB config. Debian's os-release, issue and motd come back
+# when config-package-dev removes the diversions (prerm and the debhelper
+# section below).
+set -e
+
+warn() {
+	echo "lugh-branding: $*" >&2
+}
+
+#DEBHELPER#
+
+if [ "$1" = remove ]; then
+	if command -v plymouth-set-default-theme >/dev/null 2>&1 &&
+		[ "$(plymouth-set-default-theme 2>/dev/null || true)" = lugh ]; then
+		plymouth-set-default-theme --reset ||
+			warn "could not reset the Plymouth theme; run: plymouth-set-default-theme --reset"
+		if command -v update-initramfs >/dev/null 2>&1; then
+			update-initramfs -u ||
+				warn "update-initramfs failed; run: update-initramfs -u"
+		fi
+	fi
+
+	# /etc/default/grub.d/lugh.cfg is a conffile and stays until purge, but
+	# its GRUB_THEME no longer exists, so grub-mkconfig skips the theme.
+	if [ -e /boot/grub/grub.cfg ] && command -v update-grub >/dev/null 2>&1; then
+		update-grub || warn "update-grub failed; run: update-grub"
+	fi
+fi
+
+if [ "$1" = purge ] && [ -e /boot/grub/grub.cfg ] &&
+	command -v update-grub >/dev/null 2>&1; then
+	update-grub || warn "update-grub failed; run: update-grub"
+fi
+
+exit 0
