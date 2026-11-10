@@ -1,0 +1,38 @@
+Source: lugh-session
+Section: x11
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: debhelper-compat (= 13), desktop-file-utils
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-session
+Architecture: all
+Depends: adwaita-icon-theme,
+         brightnessctl,
+         dbus-bin,
+         dbus-user-session,
+         foot,
+         gnome-keyring,
+         hyprland (>= 0.55),
+         lugh-shell (>= ${source:Version}),
+         pipewire-pulse,
+         pkexec,
+         playerctl,
+         polkitd,
+         qt6-wayland,
+         systemd,
+         wireplumber,
+         xdg-desktop-portal,
+         xdg-desktop-portal-gtk,
+         xdg-desktop-portal-hyprland,
+         xdg-terminal-exec,
+         ${misc:Depends}
+Recommends: hyprland-guiutils, libpam-gnome-keyring, pcmanfm-qt, xwayland
+Description: Lugh desktop session
+ The Wayland session of Lugh OS: the lugh-session launcher and its entry in
+ /usr/share/wayland-sessions, the Lugh configuration of the Hyprland
+ compositor (/usr/share/lugh/hypr: look, animations, rules, keybindings,
+ helper scripts) and the xdg-desktop-portal backend selection.
+ .
+ Hyprland comes from trixie-backports.
