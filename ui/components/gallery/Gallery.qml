@@ -11,6 +11,8 @@
 //   --section NAME      render one section only (focused screenshots):
 //                       tokens icons buttons iconbuttons toggles sliders badges
 //                       fields lists tabs menus surfaces feedback overlays
+//                       icontoggles chips drawers islands morph   (liquid set)
+//   --liquid-closed     start with the morph panel closed and the live island narrow
 //   --reduce-motion     Theme.reduceMotion (also --reduce)
 //
 // States: rest, pressed (`down`/`pressed` forced), focus, selected/checked,
@@ -39,10 +41,19 @@ Rectangle {
     function _has(name) { return _args.indexOf(name) >= 0 }
 
     readonly property var sectionNames: ["tokens", "icons", "buttons", "iconbuttons", "toggles", "sliders",
-        "badges", "fields", "lists", "tabs", "menus", "surfaces", "feedback", "overlays"]
+        "badges", "fields", "lists", "tabs", "menus", "surfaces", "feedback", "overlays",
+        "icontoggles", "chips", "drawers", "islands", "morph"]
     property string sectionFilter: _arg("--section", "")
     readonly property bool _solo: sectionFilter !== ""
     function shows(name) { return !_solo || sectionFilter === name }
+
+    // Liquid set, live state: the morph panel (and its status island), the
+    // drawer inside it, and what the live center island shows (clock ↔ OSD).
+    property bool liquidOpen: !_has("--liquid-closed")
+    property bool liquidDrawer: true
+    property bool islandOsd: false
+    readonly property string _ringIconToggle: "contentItem.children.0.children.2"
+    readonly property string _ringIsland: "background.children.1"
 
     // Popups open (and real focus is placed) after the first layout pass.
     property bool ready: false
@@ -319,6 +330,205 @@ Rectangle {
         }
     }
 
+    // ---- liquid set building blocks ------------------------------------------------
+    // A specimen with its state caption underneath.
+    component Spec: Column {
+        id: spec
+        property string cap
+        property color capColor: Theme.textMuted
+        default property alias specimen: specHolder.data
+        spacing: 6
+        Item {
+            id: specHolder
+            width: childrenRect.width
+            height: childrenRect.height
+        }
+        Text { text: spec.cap; font: Theme.typeCaption; color: spec.capColor }
+    }
+
+    // The control center's 2 × 4 toggle grid with its caption line (lugh-mode §3).
+    component CcGrid: Column {
+        id: cc
+        property string captionText: "Wi-Fi · Kigali Heights 5G"
+        property bool forceFocus: true
+        signal detail(string label)
+        spacing: Theme.space12
+
+        Grid {
+            columns: 4
+            columnSpacing: Math.max(Theme.space8, (cc.width - 4 * 48) / 3)
+            rowSpacing: Theme.space12
+            Repeater {
+                model: [
+                    { i: "wifi-off", c: "wifi", l: "Wi-Fi", s: "Kigali Heights 5G", on: true, d: true },
+                    { i: "bluetooth", l: "Bluetooth", s: "2 devices", d: true },
+                    { i: "moon", l: "Night light", s: "until 07:00", on: true },
+                    { i: "plane", l: "Airplane mode" },
+                    { i: "bell", c: "bell-off", l: "Do not disturb", f: true },
+                    { i: "sun-moon", l: "Dark style", on: true },
+                    { i: "zap", l: "Power profile", s: "Balanced", d: true, b: true },
+                    { i: "radio-tower", l: "Hotspot", x: true }
+                ]
+                IconToggle {
+                    required property var modelData
+                    property string galleryRing: cc.forceFocus && modelData.f ? root._ringIconToggle : ""
+                    iconName: modelData.i
+                    checkedIconName: modelData.c || ""
+                    label: modelData.l
+                    stateText: modelData.s || ""
+                    checked: !!modelData.on
+                    hasDetail: !!modelData.d
+                    busy: !!modelData.b
+                    enabled: !modelData.x
+                    onToggled: cc.captionText = label + " · " + (checked ? (stateText || "On") : "Off")
+                    onDetailRequested: { cc.captionText = label + " · details"; cc.detail(label); }
+                }
+            }
+        }
+        RowLayout {
+            width: parent.width
+            spacing: Theme.space4
+            Text {
+                Layout.fillWidth: true
+                text: cc.captionText
+                font: Theme.typeCaption
+                color: Theme.textMuted
+                elide: Text.ElideRight
+            }
+            Icon { name: "chevron-right"; size: 14; color: Theme.textMuted }
+        }
+    }
+
+    // A slider row whose chevron opens a drawer in place: chips, per-app
+    // sliders, microphone.
+    component VolumeDrawer: Column {
+        id: vd
+        property bool expanded: false
+        property string output: "spk"
+        spacing: Theme.space8
+
+        RowLayout {
+            width: parent.width
+            spacing: Theme.space4
+            Slider { Layout.fillWidth: true; compact: true; iconName: "volume-2"; iconTooltip: "Mute"; value: 0.64 }
+            IconButton {
+                iconName: "chevron-down"
+                tooltip: vd.expanded ? "Hide outputs" : "Show outputs"
+                size: 28; iconSize: 16
+                rotation: vd.expanded ? 180 : 0
+                Behavior on rotation {
+                    enabled: !Theme.reduceMotion
+                    NumberAnimation { duration: Theme.durSmall; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+                }
+                onClicked: vd.expanded = !vd.expanded
+            }
+        }
+        Drawer {
+            width: parent.width
+            expanded: vd.expanded
+            Column {
+                width: parent.width
+                spacing: Theme.space8
+                Flow {
+                    width: parent.width
+                    spacing: Theme.space4
+                    Chip { text: "Speakers"; iconName: "speaker"; selected: vd.output === "spk"; onClicked: vd.output = "spk" }
+                    Chip { text: "Headphones"; iconName: "headphones"; selected: vd.output === "hp"; onClicked: vd.output = "hp" }
+                    Chip { text: "HDMI"; selected: vd.output === "hdmi"; onClicked: vd.output = "hdmi" }
+                }
+                Repeater {
+                    model: [["globe", "Firefox", 0.8], ["music", "VLC", 0.45]]
+                    RowLayout {
+                        required property var modelData
+                        width: parent.width
+                        spacing: Theme.space8
+                        Text {
+                            Layout.preferredWidth: 52
+                            text: modelData[1]; font: Theme.typeCaption; color: Theme.textMuted; elide: Text.ElideRight
+                        }
+                        Slider { Layout.fillWidth: true; compact: true; iconName: modelData[0]; value: modelData[2] }
+                    }
+                }
+                Slider { width: parent.width; compact: true; iconName: "mic"; iconTooltip: "Mute microphone"; value: 0.5 }
+            }
+        }
+    }
+
+    // The three bar islands, for the island and morph stages.
+    component BarIslands: Item {
+        id: bar
+        property alias statusIsland: statusIsl
+        property bool live: false          // the center island switches clock ↔ OSD on click
+        property bool statusActive: false
+        signal statusClicked()
+        height: Theme.barHeight
+
+        Island {
+            x: Theme.islandSideMargin; y: Theme.islandMargin
+            text: "Lugh menu"
+            Image {
+                source: root._logoUrl
+                sourceSize: Qt.size(36, 36)
+                width: 18; height: 18
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text { text: "Firefox"; font: Theme.typeLabel; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { width: 1; height: 14; color: Theme.border; anchors.verticalCenter: parent.verticalCenter }
+            Row {
+                spacing: 6
+                anchors.verticalCenter: parent.verticalCenter
+                Repeater {
+                    model: 4
+                    Rectangle {
+                        required property int index
+                        width: index === 1 ? 16 : 6; height: 6; radius: 3
+                        color: index === 1 ? Theme.accent : Theme.textMuted
+                        opacity: index === 1 || index === 0 ? 1 : 0.5
+                    }
+                }
+            }
+        }
+        Island {
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Theme.islandMargin
+            text: "Notifications and calendar"
+            onClicked: if (bar.live) root.islandOsd = !root.islandOsd
+            Icon {
+                visible: bar.live && root.islandOsd
+                name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter
+            }
+            Slider {
+                visible: bar.live && root.islandOsd
+                compact: true; value: 0.64; width: 120
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                text: bar.live && root.islandOsd ? "64" : "Tue 10 · 02:20"
+                font: Theme.typeLabelTnum; color: Theme.text
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Rectangle {
+                visible: !(bar.live && root.islandOsd)
+                width: 6; height: 6; radius: 3; color: Theme.accent
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+        Island {
+            id: statusIsl
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.islandSideMargin
+            y: Theme.islandMargin
+            text: "Control center"
+            active: bar.statusActive
+            onClicked: bar.statusClicked()
+            Text { text: "US"; font: Theme.typeLabel; color: Theme.textMuted; anchors.verticalCenter: parent.verticalCenter }
+            Icon { name: "wifi"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Icon { name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Icon { name: "battery-medium"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "64"; font: Theme.typeLabelTnum; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+        }
+    }
+
     // ---- the page ----------------------------------------------------------------
     Flickable {
         id: flick
@@ -487,6 +697,11 @@ Rectangle {
                                 text: "Shell transparency"
                                 checked: Theme.transparency
                                 onToggled: Theme.transparency = checked
+                            }
+                            Toggle {
+                                text: "Liquid panel open"
+                                checked: root.liquidOpen
+                                onToggled: root.liquidOpen = checked
                             }
                             Text {
                                 text: (Theme.dark ? "Dark" : "Light") + " · " + Theme.accentName
@@ -1189,6 +1404,33 @@ Rectangle {
                                 RowLabel { text: "narrow 160" }
                                 Slider { Layout.preferredWidth: 160; iconName: "volume-1"; showValue: true; value: 0.08 }
                             }
+                            Rule {}
+                            Sub { text: "Compact · 20 px track" }
+                            Note { text: "`compact: true` for islands, the OSD and control-center rows. Same API, 14 px icon, 32 px hit target." }
+                            GridLayout {
+                                columns: 2
+                                columnSpacing: Theme.space16
+                                rowSpacing: Theme.space8
+                                RowLabel { text: "plain" }
+                                Slider { Layout.fillWidth: true; compact: true; value: 0.35 }
+                                RowLabel { text: "icon + value" }
+                                Slider { Layout.fillWidth: true; compact: true; iconName: "volume-2"; iconTooltip: "Mute"; showValue: true; value: 0.62 }
+                                RowLabel { text: "pressed" }
+                                Slider { Layout.fillWidth: true; compact: true; iconName: "sun"; showValue: true; value: 0.8; pressed: true }
+                                RowLabel { text: "focus" }
+                                Slider { Layout.fillWidth: true; compact: true; iconName: "mic"; showValue: true; value: 0.45; property string galleryRing: "background" }
+                                RowLabel { text: "disabled" }
+                                Slider { Layout.fillWidth: true; compact: true; iconName: "mic"; showValue: true; value: 0.5; enabled: false }
+                                RowLabel { text: "empty · full" }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Theme.space16
+                                    Slider { Layout.fillWidth: true; compact: true; iconName: "volume-x"; value: 0 }
+                                    Slider { Layout.fillWidth: true; compact: true; iconName: "sun"; value: 1 }
+                                }
+                                RowLabel { text: "narrow 140" }
+                                Slider { Layout.preferredWidth: 140; compact: true; iconName: "volume-1"; value: 0.08 }
+                            }
                         }
 
                         // ---- icons -----------------------------------------------------------
@@ -1360,6 +1602,7 @@ Rectangle {
                                 Tabs {
                                     Layout.preferredWidth: 360
                                     model: ["Overview", "Processes", "Startup apps", "Services", "Bottles", "History"]
+                                    _fadeColor: Theme.surface   // the tabs sit on the section's surface, not on bg
                                     currentIndex: 0
                                 }
                             }
@@ -1441,6 +1684,355 @@ Rectangle {
                                 text: "“Photoshop” stopped responding while saving “poster-final-v3.psd”. Your last autosave from 09:12 is safe; "
                                     + "reopen the app to recover it, or send a report so we can look into it."
                                 actionText: "Reopen"
+                            }
+                        }
+                    }
+                }
+
+                // ---- liquid set (design language v2) -----------------------------------------
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root._solo ? 0 : root._gap
+
+                    ColumnLayout {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: root._colW
+                        Layout.maximumWidth: root._colW
+                        visible: secIconToggles.shown || secChips.shown || secDrawers.shown
+                        spacing: Theme.space48
+
+                        // ---- icon toggles ---------------------------------------------
+                        Section {
+                            id: secIconToggles
+                            name: "icontoggles"; shown: root.shows(name)
+                            title: "IconToggle"
+                            caption: "Round 48 px toggles for the control center. On = tone fill growing from the center, and the icon "
+                                + "swaps so state is never color alone. The grid never spells the state: the caption line, tooltip and "
+                                + "accessible name do. A chevron tick marks toggles with a drawer (tick, long press, right click or →)."
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: Theme.space20
+                                Spec { cap: "off"; IconToggle { iconName: "bluetooth"; label: "Bluetooth" } }
+                                Spec { cap: "on"; IconToggle { iconName: "wifi-off"; checkedIconName: "wifi"; label: "Wi-Fi"; checked: true } }
+                                Spec { cap: "detail"; IconToggle { iconName: "bluetooth"; label: "Bluetooth"; hasDetail: true } }
+                                Spec { cap: "on + detail"; IconToggle { iconName: "wifi-off"; checkedIconName: "wifi"; label: "Wi-Fi"; checked: true; hasDetail: true } }
+                                Spec { cap: "busy"; IconToggle { iconName: "wifi-off"; label: "Wi-Fi"; busy: true } }
+                                Spec { cap: "busy on"; IconToggle { iconName: "wifi"; label: "Wi-Fi"; checked: true; busy: true } }
+                                Spec { cap: "pressed"; IconToggle { iconName: "moon"; label: "Night light"; down: true } }
+                                Spec { cap: "focus"; IconToggle { iconName: "plane"; label: "Airplane mode"; property string galleryRing: root._ringIconToggle } }
+                                Spec { cap: "focus on"; IconToggle { iconName: "moon"; label: "Night light"; checked: true; property string galleryRing: root._ringIconToggle } }
+                                Spec { cap: "disabled"; IconToggle { iconName: "plane"; label: "Airplane mode"; enabled: false } }
+                                Spec { cap: "disabled on"; IconToggle { iconName: "moon"; label: "Night light"; checked: true; enabled: false } }
+                            }
+                            Rule {}
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.space20
+                                Spec { cap: "danger"; IconToggle { iconName: "bell-off"; label: "Do not disturb"; checked: true; tone: "danger" } }
+                                Spec { cap: "success"; IconToggle { iconName: "leaf"; label: "Power saver"; checked: true; tone: "success" } }
+                                Spec { cap: "info"; IconToggle { iconName: "monitor"; label: "Cast"; checked: true; tone: "info" } }
+                                Spec { cap: "neutral"; IconToggle { iconName: "keyboard"; label: "On-screen keyboard"; checked: true; tone: "neutral" } }
+                                Rectangle { implicitWidth: 1; implicitHeight: 48; color: Theme.border; Layout.alignment: Qt.AlignTop }
+                                Spec { cap: "size 40"; IconToggle { iconName: "sun"; label: "Brightness"; size: 40; checked: true } }
+                                Spec { cap: "40 + detail"; IconToggle { iconName: "zap"; label: "Power profile"; size: 40; hasDetail: true } }
+                                Spec { cap: "size 32"; IconToggle { iconName: "mic"; label: "Microphone"; size: 32 } }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Rule {}
+                            Sub { text: "Control-center grid · 2 × 4 on glass" }
+                            Backdrop {
+                                Layout.fillWidth: true
+                                implicitHeight: ccGlass.height + 2 * Theme.space24
+                                GlassPanel {
+                                    id: ccGlass
+                                    anchors.centerIn: parent
+                                    width: 320
+                                    height: ccGridDemo.implicitHeight + 2 * Theme.space12
+                                    CcGrid {
+                                        id: ccGridDemo
+                                        x: Theme.space12; y: Theme.space12
+                                        width: parent.width - 2 * Theme.space12
+                                    }
+                                }
+                            }
+                            Note {
+                                text: "Row 1: on with detail, off with detail, on, off. Row 2: focused, on, busy with detail, disabled. "
+                                    + "Clicking a toggle updates the caption line."
+                            }
+                        }
+
+                        // ---- chips ------------------------------------------------------
+                        Section {
+                            id: secChips
+                            name: "chips"; shown: root.shows(name)
+                            title: "Chip"
+                            caption: "Small selectable capsules for audio outputs and power profiles: 28 px in a 32 px hit target. "
+                                + "Selected = accent tint, accent text and a check that replaces the icon."
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: Theme.space16
+                                Spec { cap: "rest"; Chip { text: "Speakers"; iconName: "speaker" } }
+                                Spec { cap: "selected"; Chip { text: "Headphones"; iconName: "headphones"; selected: true } }
+                                Spec { cap: "no icon"; Chip { text: "Balanced" } }
+                                Spec { cap: "selected, no icon"; Chip { text: "Performance"; selected: true } }
+                                Spec { cap: "pressed"; Chip { text: "HDMI"; iconName: "monitor"; down: true } }
+                                Spec { cap: "focus"; Chip { text: "USB audio"; iconName: "usb"; property string galleryRing: "background" } }
+                                Spec { cap: "focus selected"; Chip { text: "Speakers"; selected: true; property string galleryRing: "background" } }
+                                Spec { cap: "disabled"; Chip { text: "Bluetooth"; iconName: "bluetooth"; enabled: false } }
+                                Spec { cap: "disabled selected"; Chip { text: "Bluetooth"; selected: true; enabled: false } }
+                                Spec { cap: "elided · 130"; Chip { text: "LG UltraFine Display Audio"; iconName: "monitor"; width: 130 } }
+                            }
+                            Rule {}
+                            Sub { text: "On glass · single choice" }
+                            Backdrop {
+                                id: chipStage
+                                property string profile: "balanced"
+                                Layout.fillWidth: true
+                                implicitHeight: chipGlass.height + 2 * Theme.space24
+                                GlassPanel {
+                                    id: chipGlass
+                                    anchors.centerIn: parent
+                                    width: chipRow.implicitWidth + 2 * Theme.space12
+                                    height: chipRow.implicitHeight + 2 * Theme.space12
+                                    Row {
+                                        id: chipRow
+                                        x: Theme.space12; y: Theme.space12
+                                        spacing: Theme.space8
+                                        Repeater {
+                                            model: [["saver", "Power saver", "leaf"], ["balanced", "Balanced", "gauge"], ["perf", "Performance", "rocket"]]
+                                            Chip {
+                                                required property var modelData
+                                                text: modelData[1]; iconName: modelData[2]
+                                                selected: chipStage.profile === modelData[0]
+                                                onClicked: chipStage.profile = modelData[0]
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- drawers ----------------------------------------------------
+                        Section {
+                            id: secDrawers
+                            name: "drawers"; shown: root.shows(name)
+                            title: "Drawer"
+                            caption: "Expands in place; the height springs and neighbours glide with it. Collapsed content is not rendered. "
+                                + "The chevron toggles each one here."
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.space16
+                                Repeater {
+                                    model: [false, true]
+                                    ColumnLayout {
+                                        required property bool modelData
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        Layout.alignment: Qt.AlignTop
+                                        spacing: Theme.space8
+                                        Cap { text: modelData ? "Expanded" : "Collapsed" }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: drawerBody.implicitHeight + 2 * Theme.space12
+                                            radius: Theme.radiusMd
+                                            color: Theme.bg
+                                            border.width: 1
+                                            border.color: Theme.border
+                                            Column {
+                                                id: drawerBody
+                                                x: Theme.space12; y: Theme.space12
+                                                width: parent.width - 2 * Theme.space12
+                                                spacing: Theme.space8
+                                                VolumeDrawer { width: parent.width; expanded: modelData }
+                                                Slider { width: parent.width; compact: true; iconName: "sun"; value: 0.8 }
+                                                Text { text: "64% · 3 h 40"; font: Theme.typeCaptionTnum; color: Theme.textMuted }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: root._colW
+                        Layout.maximumWidth: root._colW
+                        visible: secIslands.shown || secMorph.shown
+                        spacing: Theme.space48
+
+                        // ---- islands ----------------------------------------------------
+                        Section {
+                            id: secIslands
+                            name: "islands"; shown: root.shows(name)
+                            title: "Island"
+                            caption: "Floating glass capsules: the three bar islands, toasts and the OSD. 36 px tall, typeLabel text, "
+                                + "tabular numerals for live numbers. The width follows the content and springs when it changes: "
+                                + "click the center island to switch clock ↔ OSD."
+
+                            Backdrop {
+                                Layout.fillWidth: true
+                                implicitHeight: Theme.barHeight + islandStates.implicitHeight + 2 * Theme.space24
+                                BarIslands { width: parent.width; live: true }
+                                Flow {
+                                    id: islandStates
+                                    x: Theme.space24
+                                    y: Theme.barHeight + Theme.space24
+                                    width: parent.width - 2 * Theme.space24
+                                    spacing: Theme.space24
+                                    Spec {
+                                        cap: "rest"; capColor: Theme.text
+                                        Island {
+                                            text: "Clock"
+                                            Text { text: "Tue 10 · 02:20"; font: Theme.typeLabelTnum; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "pressed"; capColor: Theme.text
+                                        Island {
+                                            text: "Clock"; down: true
+                                            Text { text: "Tue 10 · 02:20"; font: Theme.typeLabelTnum; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "active (panel open)"; capColor: Theme.text
+                                        Island {
+                                            text: "Control center"; active: true
+                                            Icon { name: "wifi"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+                                            Icon { name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+                                            Text { text: "64"; font: Theme.typeLabelTnum; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "focus"; capColor: Theme.text
+                                        Island {
+                                            text: "Lugh menu"
+                                            property string galleryRing: root._ringIsland
+                                            Icon { name: "flame"; size: 16; color: Theme.accentText; anchors.verticalCenter: parent.verticalCenter }
+                                            Text { text: "Files"; font: Theme.typeLabel; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "muted text"; capColor: Theme.text
+                                        Island {
+                                            text: "Media"
+                                            Icon { name: "music"; size: 16; color: Theme.textMuted; anchors.verticalCenter: parent.verticalCenter }
+                                            Text { text: "Umuhanzi w'Ijuru · Meddy"; font: Theme.typeLabel; color: Theme.textMuted; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "OSD · not interactive"; capColor: Theme.text
+                                        Island {
+                                            text: "Volume 64%"; interactive: false
+                                            Icon { name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+                                            Slider { compact: true; value: 0.64; width: 120; anchors.verticalCenter: parent.verticalCenter }
+                                            Text { text: "64"; font: Theme.typeLabelTnum; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "OSD · caps lock"; capColor: Theme.text
+                                        Island {
+                                            text: "Caps Lock on"; interactive: false
+                                            Icon { name: "lock"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+                                            Text { text: "Caps Lock on"; font: Theme.typeLabel; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "toast · 48 px, popover shadow"; capColor: Theme.text
+                                        Island {
+                                            text: "Updates ready"; height: 48; elevation: "popover"
+                                            Icon { name: "bell"; size: 18; color: Theme.accentText; anchors.verticalCenter: parent.verticalCenter }
+                                            Column {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                Text { text: "Updates ready"; font: Theme.typeLabel; color: Theme.text }
+                                                Text { text: "12 packages · restart later"; font: Theme.typeCaption; color: Theme.textMuted }
+                                            }
+                                        }
+                                    }
+                                    Spec {
+                                        cap: "width spring: click"; capColor: Theme.text
+                                        Island {
+                                            text: "Toggle the OSD"
+                                            onClicked: root.islandOsd = !root.islandOsd
+                                            Icon { name: root.islandOsd ? "sun" : "bell"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: root.islandOsd ? "Brightness · 80% · night light on" : "3 new"
+                                                font: Theme.typeLabelTnum; color: Theme.text
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- morph panel --------------------------------------------------
+                        Section {
+                            id: secMorph
+                            name: "morph"; shown: root.shows(name)
+                            title: "MorphPanel"
+                            caption: "Panels grow out of the island you touched and settle with the liquid spring; closing is quicker, "
+                                + "with no overshoot. Click the status island (or the header switch) to replay. The chevron opens the "
+                                + "drawer and the panel grows with it. Reduce motion turns it into a 100 ms fade."
+
+                            Backdrop {
+                                id: morphStage
+                                Layout.fillWidth: true
+                                implicitHeight: 560
+                                BarIslands {
+                                    id: morphBar
+                                    width: parent.width
+                                    statusActive: root.liquidOpen
+                                    onStatusClicked: root.liquidOpen = !root.liquidOpen
+                                }
+                                MorphPanel {
+                                    anchors.fill: parent
+                                    open: root.liquidOpen
+                                    originRect: Qt.rect(morphBar.statusIsland.x, morphBar.statusIsland.y,
+                                                        morphBar.statusIsland.width, morphBar.statusIsland.height)
+                                    targetRect: Qt.rect(morphStage.width - 320 - Theme.islandSideMargin, Theme.barHeight, 320,
+                                                        ccBody.implicitHeight + 2 * Theme.space12)
+                                    Column {
+                                        id: ccBody
+                                        x: Theme.space12; y: Theme.space12
+                                        width: parent.width - 2 * Theme.space12
+                                        spacing: Theme.space12
+                                        CcGrid { width: parent.width; forceFocus: false }
+                                        VolumeDrawer {
+                                            width: parent.width
+                                            expanded: root.liquidDrawer
+                                            onExpandedChanged: root.liquidDrawer = expanded
+                                        }
+                                        Slider { width: parent.width; compact: true; iconName: "sun"; iconTooltip: "Night light"; value: 0.8 }
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: Theme.space4
+                                            Icon { name: "battery-medium"; size: 16; color: Theme.textMuted }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "64% · 3 h 40"
+                                                font: Theme.typeCaptionTnum; color: Theme.textMuted
+                                            }
+                                            IconButton { iconName: "lock"; tooltip: "Lock"; size: 28; iconSize: 16 }
+                                            IconButton { iconName: "power"; tooltip: "Power"; size: 28; iconSize: 16 }
+                                        }
+                                    }
+                                }
+                                Text {
+                                    x: Theme.space24
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: Theme.space16
+                                    width: parent.width - 320 - 3 * Theme.space24
+                                    text: "origin: status island rect, radius 18  →  target: 320 px, radiusXl\n"
+                                        + "content fades in from 40% progress, fully visible at 85%"
+                                    font: Theme.typeCaption
+                                    lineHeight: Theme.lineBody
+                                    color: Theme.text
+                                    wrapMode: Text.Wrap
+                                }
                             }
                         }
                     }
