@@ -5,16 +5,29 @@
 //   scripts/shell-preview.sh [--width 1440] [--height 900] [--dark]
 //       [--accent amber|teal|green|blue|red|graphite] [--reduce-motion]
 //       [--state none|launcher|controlcenter|notifications|menu|lock|osd|toast]
-//       [--query <text>] [--screenshot <out.png>] [--measure]
-//       [--wallpaper-dir <file URL/>]   (set by the script when needed)
+//       [--query <text>]                       with --state launcher
+//       [--page wifi|bluetooth|sound|power]    with --state controlcenter
+//       [--kind volume|brightness|mic|caps|layout|airplane] [--value 0..1]
+//                                              with --state osd
+//       [--backend ws://127.0.0.1:7777]        live services (lugh-shell-devd)
+//       [--screenshot <out.png>] [--shot-delay <ms>] [--measure]
+//       [--motion <state> --motion-out <dir>] [--motion-frames 24]
+//       [--motion-ms <stop after ms>] [--motion-offset <ms before 1st grab>]
+//       [--wallpaper-dir <file URL/>]          (set by the script when needed)
 //
 // Keys: Meta/Ctrl+Space launcher · Ctrl+C control center · Ctrl+N
 // notifications · Ctrl+L lock · Ctrl+D dark toggle · Esc closes.
 //
 // Stacking mirrors the layer-shell layers: background (Wallpaper) < app
-// windows < top (Bar, Dock) < overlay (menus, centers, toasts, OSD, lock).
-// Glass: behind glass the compositor blurs; here the pre-blurred wallpaper
-// (`Wallpaper { blurred: true }`) is drawn under each glass surface instead.
+// windows < top (Bar, Dock) < overlay (panels, toasts, lock).
+// Glass: on Hyprland the compositor blurs behind glass. Here Theme.backdrop is
+// set to a pre-blurred wallpaper and GlassPanel draws the part under itself.
+//
+// --motion: once everything is loaded and settled, grabs the scene, applies
+// <state>, then keeps grabbing every ~33 ms; the frames go to <dir> as
+// f-<nn>-<ms>.png (ms since the trigger). A grab of the whole scene takes
+// 35–100 ms, so scripts/shell-motion.sh runs several passes whose first grab
+// is shifted by --motion-offset and interleaves them into contact sheets.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
@@ -33,8 +46,15 @@ Window {
         return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
     }
     function flag(name) { return args.indexOf(name) >= 0; }
-    readonly property string startState: arg("--state", "none")
+    readonly property string motionName: arg("--motion", "")
+    readonly property string motionDir: arg("--motion-out", "")
+    readonly property int motionFrames: Number(arg("--motion-frames", 24))
+    readonly property int motionMs: Number(arg("--motion-ms", 0))
+    readonly property int motionOffset: Number(arg("--motion-offset", 0))
+    // With --motion the state is applied by the capture, not at start.
+    readonly property string startState: motionName !== "" ? "none" : arg("--state", "none")
     readonly property string shotPath: arg("--screenshot", "")
+    readonly property string backendUrl: arg("--backend", "")
 
     width: Number(arg("--width", 1440))
     height: Number(arg("--height", 900))
@@ -42,16 +62,15 @@ Window {
     color: "#000000"
     title: "Lugh preview"
 
-    // Layer-shell geometry (contract in ui/shell/README.md).
-    readonly property int barHeight: bar.item ? bar.item.implicitHeight : 30
+    // Layer-shell geometry (contract in ui/shell/README.md): windows keep
+    // clear of the bar's and the dock's exclusive zones.
+    readonly property int barZone: bar.item && bar.item.exclusiveZone !== undefined
+                                   ? bar.item.exclusiveZone : Theme.barExclusiveZone
     readonly property int dockZone: dock.item ? dock.item.exclusiveZone : 0
-    // Theme.backdrop (preview-only hook in Lugh.UI): when Theme has it,
-    // GlassPanel draws the blurred wallpaper itself and the frame-side
-    // fallback below the Bar/Dock is switched off.
-    readonly property bool themeBackdrop: "backdrop" in Theme
 
     // Surfaces are created only once Theme/Services are configured from the
-    // args (no light→dark cross-fade at start, no wallpaper lookup misses).
+    // args (no light→dark cross-fade at start, no wallpaper lookup misses)
+    // and, with --backend, once it is connected (or 1.5 s passed).
     property bool configured: false
 
     // A surface from Lugh.Shell, tolerant of missing types.
@@ -61,11 +80,11 @@ Window {
         sourceComponent: Opt.component("Lugh.Shell", type)
     }
     // A full-screen overlay surface: drawn only while `shown` (an unmapped
-    // layer window in production), takes focus while open.
+    // layer window in production), takes focus while open. Created
+    // asynchronously after the first frame, as in main.qml.
     component Overlay: Surface {
         id: ov
         anchors.fill: parent
-        // Created asynchronously after the first frame, as in main.qml.
         active: win.configured && win._firstFrame
         asynchronous: true
         readonly property bool shown: item !== null && item.shown === true
@@ -76,26 +95,19 @@ Window {
         }
     }
 
-    // Simulated blur under a surface's `panelItem` (when it has one).
-    component Backdrop: PanelBackdrop {
-        required property Loader surface
-        source: blurredWall
-        panel: !win.themeBackdrop && surface.item && surface.item.panelItem
-               ? surface.item.panelItem : null
-    }
-
     Item {
         id: desk
         anchors.fill: parent
         focus: true
 
         // ---- background layer ---------------------------------------------
-        // Pre-blurred wallpaper, under the sharp one: the source of every
-        // glass backdrop (sampled through ShaderEffectSource).
+        // Pre-blurred wallpaper (small file), under the sharp one: what
+        // GlassPanel samples through Theme.backdrop.
         Surface {
             id: blurredWall
             type: "Wallpaper"
             anchors.fill: parent
+            active: win.configured && Theme.transparency
             onLoaded: item.blurred = true
         }
         Surface {
@@ -104,10 +116,10 @@ Window {
             anchors.fill: parent
         }
 
-        // ---- app windows (work area between the bar and the dock zone) -----
+        // ---- app windows (work area between the bar and the dock zones) -----
         Item {
             id: windows
-            anchors { fill: parent; topMargin: win.barHeight; bottomMargin: win.dockZone }
+            anchors { fill: parent; topMargin: win.barZone; bottomMargin: win.dockZone }
             visible: Services.wm.activeWorkspace === 1
 
             // Bottom → top. raise() moves an id to the end.
@@ -120,6 +132,7 @@ Window {
             }
             function focusWindow(id) {
                 raise(id);
+                if (Services.live) return;
                 const map = { browser: "0x1", terminal: "0x2" };
                 if (map[id]) {
                     Services.wm.activate(map[id]);
@@ -138,11 +151,12 @@ Window {
                 }
             }
 
+            // Floating windows, 12 px or more clear of the islands' zone.
             MockWindow {
                 id: filesWin
                 title: "Documents"
                 x: Math.round(windows.width * 0.05)
-                y: Math.round(windows.height * 0.05)
+                y: Math.round(windows.height * 0.07)
                 width: Math.round(windows.width * 0.42)
                 height: Math.round(windows.height * 0.56)
                 z: windows.stack.indexOf("files")
@@ -171,9 +185,9 @@ Window {
                 bodyColor: Theme.surface
                 titleBarColor: Theme.bg
                 x: Math.round(windows.width * 0.2)
-                y: Math.round(windows.height * 0.08)
+                y: Math.round(windows.height * 0.03)
                 width: Math.round(windows.width * 0.55)
-                height: Math.round(windows.height * 0.8)
+                height: Math.round(windows.height * 0.86)
                 z: windows.stack.indexOf("browser")
                 focused: windows.focusedId === "browser"
                 onActivated: windows.focusWindow("browser")
@@ -182,27 +196,12 @@ Window {
         }
 
         // ---- top layer ------------------------------------------------------
-        GlassBackdrop {
-            visible: !win.themeBackdrop && bar.item !== null && blurredWall.item !== null
-            source: blurredWall
-            x: bar.x; y: bar.y
-            width: bar.width; height: bar.height
-        }
         Surface {
             id: bar
             type: "Bar"
             x: 0; y: 0
             width: parent.width
             height: item ? item.implicitHeight : 0
-        }
-
-        GlassBackdrop {
-            readonly property rect r: dock.item ? dock.item.inputRect : Qt.rect(0, 0, 0, 0)
-            visible: !win.themeBackdrop && dock.item !== null && blurredWall.item !== null && r.width > 0
-            source: blurredWall
-            radius: Theme.radiusXl
-            x: dock.x + r.x; y: dock.y + r.y
-            width: r.width; height: r.height
         }
         Surface {
             id: dock
@@ -212,15 +211,9 @@ Window {
         }
 
         // ---- overlay layer (most recently stacked on top) -------------------
-        // Each overlay that exposes `readonly property Item panelItem` (its
-        // glass panel) gets the simulated blur under that panel.
-        Backdrop { surface: lughMenu }
         Overlay { id: lughMenu; type: "LughMenu" }
-        Backdrop { surface: launcher }
         Overlay { id: launcher; type: "Launcher" }
-        Backdrop { surface: controlCenter }
         Overlay { id: controlCenter; type: "ControlCenter" }
-        Backdrop { surface: notificationCenter }
         Overlay { id: notificationCenter; type: "NotificationCenter" }
 
         Surface {
@@ -228,18 +221,8 @@ Window {
             type: "NotificationPopups"
             active: win.configured && win._firstFrame
             asynchronous: true
-            // top 30 + 8, right 8 (main.qml: below the bar's exclusive zone).
-            anchors { top: parent.top; topMargin: win.barHeight + 8; right: parent.right; rightMargin: 8 }
-            visible: item !== null && item.shown === true
-        }
-        Surface {
-            id: osd
-            type: "Osd"
-            active: win.configured && win._firstFrame
-            asynchronous: true
-            // 96 px above the bottom edge, but never closer than 24 px to the
-            // dock's exclusive zone (main.qml does the same).
-            anchors { bottom: parent.bottom; bottomMargin: Math.max(96, win.dockZone + 24); horizontalCenter: parent.horizontalCenter }
+            // Under the status island: bar height from the top, 10 from the right.
+            anchors { top: parent.top; topMargin: Theme.barHeight; right: parent.right; rightMargin: 10 }
             visible: item !== null && item.shown === true
         }
 
@@ -254,12 +237,51 @@ Window {
     Shortcut { sequence: "Ctrl+D"; onActivated: Theme.dark = !Theme.dark }
     Shortcut { sequence: "Esc"; enabled: ShellState.anyOverlayOpen; onActivated: ShellState.closeAll() }
 
+    // ---- live backend (--backend ws://…) ----------------------------------
+    // WsBackend is loaded by URL (it needs QtWebSockets, which production
+    // never does). Missing file or module: one warning, the mock stays.
+    property QtObject wsBackend: null
+    function startBackend(url) {
+        const c = Qt.createComponent(Qt.resolvedUrl("Lugh/Shell/backend/WsBackend.qml"));
+        if (c.status !== Component.Ready) {
+            console.warn("lugh-preview: --backend unavailable, using the mock:", c.errorString().trim());
+            return false;
+        }
+        wsBackend = c.createObject(win, { url: url });
+        if (wsBackend && wsBackend.connected) backendUp();
+        return wsBackend !== null;
+    }
+    function backendUp() {
+        if (!Services.live) {
+            Services.attach(wsBackend);
+            console.info("lugh-preview: attached to", backendUrl);
+        }
+        configured = true;
+    }
+    Connections {
+        target: win.wsBackend
+        ignoreUnknownSignals: true
+        function onConnectedChanged() { if (win.wsBackend.connected) win.backendUp(); }
+    }
+    Timer {
+        id: backendWait
+        interval: 1500
+        onTriggered: {
+            if (!Services.live) console.warn("lugh-preview: no answer from", win.backendUrl, "yet; showing mock data until it connects");
+            win.configured = true;
+        }
+    }
+
     // ---- start-up -----------------------------------------------------------
     // --state is applied once every deferred surface has loaded (or failed).
     readonly property bool overlaysReady: _firstFrame
-        && [lughMenu, launcher, controlCenter, notificationCenter, lockScreen, popups, osd]
+        && [lughMenu, launcher, controlCenter, notificationCenter, lockScreen, popups]
            .every(l => l.status !== Loader.Loading && (l.status === Loader.Ready || l.sourceComponent === null))
-    onOverlaysReadyChanged: if (overlaysReady) applyState(startState)
+    onOverlaysReadyChanged: if (overlaysReady) {
+        applyState(startState);
+        _stateApplied = true;
+        if (motionName !== "") motionSettle.start();
+    }
 
     function applyState(s) {
         switch (s) {
@@ -273,11 +295,16 @@ Window {
             });
             break;
         }
-        case "controlcenter": ShellState.toggleControlCenter(); break;
+        case "controlcenter": {
+            const page = arg("--page", "");
+            if (page !== "") ShellState.openControlCenter(page);
+            else ShellState.toggleControlCenter();
+            break;
+        }
         case "notifications": ShellState.toggleNotificationCenter(); break;
         case "menu": ShellState.toggleLughMenu(); break;
         case "lock": Services.session.lock(); break;
-        case "osd": Services.osd.show("volume", 0.62); break;
+        case "osd": Services.osd.show(arg("--kind", "volume"), Number(arg("--value", 0.62))); break;
         case "toast":
             Services.notifications.notify("Calendar", "Design review in 15 minutes",
                                           "Shell visuals with Keza and Jean-Paul · Room 2");
@@ -285,9 +312,8 @@ Window {
                                           "lugh-0.1-amd64.iso (1.9 GB) is in Downloads.");
             break;
         case "none": case "": break;
-        default: console.warn("lugh-preview: unknown --state", s);
+        default: console.warn("lugh-preview: unknown state", s);
         }
-        _stateApplied = true;
     }
 
     Component.onCompleted: {
@@ -295,32 +321,40 @@ Window {
         Theme.accentName = arg("--accent", "amber");
         if (flag("--reduce-motion")) Theme.reduceMotion = true;
         // Bundled wallpaper dir when lugh-branding isn't installed (passed by
-        // scripts/shell-preview.sh); needs Services.appearance.wallpaperDir.
+        // scripts/shell-preview.sh).
         const wpDir = arg("--wallpaper-dir", "");
-        if (wpDir !== "" && "wallpaperDir" in Services.appearance) Services.appearance.wallpaperDir = wpDir;
-        configured = true;
-        if (themeBackdrop) Theme.backdrop = blurredWall;
+        if (wpDir !== "") Services.appearance.wallpaperDir = wpDir;
+        Theme.backdrop = blurredWall;
+        if (backendUrl !== "" && startBackend(backendUrl)) {
+            if (!configured) backendWait.start();
+        } else {
+            configured = true;
+        }
     }
 
     // First frame: printed for the start-up budget (scripts/shell-preview.sh
     // --measure turns it into ms since process start).
     property bool _firstFrame: false
-    onFrameSwapped: if (!_firstFrame) {
-        _firstFrame = true;
-        console.info("lugh-preview: first-frame-epoch-ms", Date.now());
-        if (flag("--measure")) measureQuit.start();
+    Connections {
+        target: win
+        enabled: !win._firstFrame
+        function onFrameSwapped() {
+            win._firstFrame = true;
+            console.info("lugh-preview: first-frame-epoch-ms", Date.now());
+            if (win.flag("--measure")) measureQuit.start();
+        }
     }
     // Quit 1.5 s after the first frame (deferred overlays have loaded by then,
     // so max RSS includes them).
     Timer { id: measureQuit; interval: 1500; onTriggered: Qt.quit() }
 
-    // --screenshot: once the state is applied, let loads and open animations
-    // settle (~1.2 s), grab, quit.
+    // --screenshot: once the state is applied, let loads and open springs
+    // settle, grab, quit. The OSD only stays 1.2 s, so it is caught earlier.
     property bool _stateApplied: false
     Timer {
         running: win.shotPath !== "" && win._stateApplied
-        interval: 1200
-        onTriggered: win.contentItem.grabToImage(r => {
+        interval: Number(win.arg("--shot-delay", win.startState === "osd" ? 450 : 1200))
+        onTriggered: desk.grabToImage(r => {
             if (!r.saveToFile(win.shotPath)) {
                 console.error("lugh-preview: could not write", win.shotPath);
                 Qt.exit(3);
@@ -329,5 +363,48 @@ Window {
                 Qt.exit(0);
             }
         })
+    }
+
+    // ---- --motion capture ---------------------------------------------------
+    // Grab results are kept in memory and written at the end, so encoding
+    // PNGs never stalls the animation being recorded. Each frame carries the
+    // time it was asked for, in ms since the trigger (frame 0 = before).
+    property var _frames: []
+    property double _motionT0: 0
+    property double _lastGrab: 0
+    Timer { id: motionSettle; interval: 700; onTriggered: win._grabFrame() }
+    Timer { id: motionNext; onTriggered: win._grabFrame() }
+    function _grabFrame() {
+        const asked = Date.now();
+        _lastGrab = asked;
+        desk.grabToImage(r => {
+            const first = _frames.length === 0;
+            _frames.push({ image: r, t: first ? 0 : Math.round(asked - _motionT0) });
+            if (first) {
+                _motionT0 = Date.now();
+                applyState(motionName);
+            }
+            if (_frames.length >= motionFrames || (motionMs > 0 && asked - _motionT0 >= motionMs)) {
+                _saveFrames();
+                return;
+            }
+            motionNext.interval = first ? Math.max(1, motionOffset)
+                                        : Math.max(1, 33 - (Date.now() - _lastGrab));
+            motionNext.start();
+        });
+    }
+    function _saveFrames() {
+        const pad = (n, w) => String(n).padStart(w, "0");
+        for (let i = 0; i < _frames.length; ++i) {
+            const f = _frames[i];
+            const path = motionDir + "/f-" + pad(i, 2) + "-" + pad(f.t, 4) + ".png";
+            if (!f.image.saveToFile(path)) {
+                console.error("lugh-preview: could not write", path);
+                Qt.exit(3);
+                return;
+            }
+        }
+        console.info("lugh-preview: wrote", _frames.length, "frames over", _frames[_frames.length - 1].t, "ms to", motionDir);
+        Qt.exit(0);
     }
 }
