@@ -1,23 +1,30 @@
-// Lock screen (shell spec §Lock screen, phase-1 §4): blurred wallpaper, a
-// large clock and date, the user and a password field, and a small status
-// row. The frame anchors it to the whole screen and maps it while `shown`.
+// Lock screen in the liquid language (docs/design/lugh-mode.md, ADR-029): the
+// blurred wallpaper, the clock as the hero, the password field in a floating
+// glass capsule, and small glass capsules in the bottom corners. The frame
+// anchors it to the whole screen (every screen) and maps it while `shown`.
 //
 //   LockScreen { anchors.fill: parent }      // shown while Services.session.locked
 //
 // Behaviour
 //   - The field is focused as soon as the screen locks; typing anywhere jumps
 //     into it. Enter submits Services.session.unlock(text), Esc clears it.
-//   - authenticating: spinner in the field's trailing area, input read-only.
-//   - authError: the field shakes (3 short oscillations, none under reduce
-//     motion), is cleared and refocused, and the error shows inline with an
-//     icon. Caps Lock shows a warning with an icon.
-//   - Idle: 10 s without input hides everything but the clock (fade); any key
-//     or pointer movement brings it back. The half-typed password is cleared.
-//   - Unlock: the whole surface fades and scales 1.0 → 1.04 (durLarge); under
-//     reduce motion it only fades. `shown` stays true until that finishes.
+//   - Started already locked (the shell restarted while locked): complete on
+//     the first frame, no entrance animation, field focused.
+//   - authenticating (0.3–2 s with PAM): spinner in the submit button, field
+//     read-only. The capsule squishes on submit.
+//   - authError: the capsule shakes (not under reduce motion), the field is
+//     cleared and refocused, and the error glides out in a small capsule under
+//     it, verbatim ("Too many attempts. Try again in 8 s."). The field stays
+//     usable. Caps Lock shows the same way.
+//   - Idle: `idleTimeout` s without input hides everything but the clock; any
+//     key or pointer movement brings it back. A half-typed password is cleared.
+//   - Unlock: the scene lifts and fades (durLarge); under reduce motion it
+//     only fades. `shown` stays true until that finishes.
+//   - While shown it swallows every pointer and key event (no click-through,
+//     no shortcut leaks to items behind it).
 //
 // Privacy (spec §Security & privacy): only the notification COUNT is shown,
-// never content; media controls show no artwork.
+// never content; media shows the title and controls, no artwork.
 import QtQuick
 import QtQuick.Templates as T
 import Lugh.UI
@@ -34,6 +41,8 @@ FocusScope {
     property bool idle: false
     // Seconds of no input before idling.
     property int idleTimeout: 10
+    // True while the entrance, the unlock or the capsule moves.
+    readonly property bool animating: enterAnim.running || leaveAnim.running || capsule.animating
 
     readonly property var session: Services.session
     // Accessible label of the password field.
@@ -47,27 +56,31 @@ FocusScope {
     Accessible.name: qsTr("Lock screen")
 
     // ---- lifecycle -----------------------------------------------------------
-    function _enter() {
+    function _enter(animate) {
         leaveAnim.stop();
+        enterAnim.stop();
         _leaving = false;
         surface.opacity = 1;
-        surface.scale = 1;
+        lift.y = 0;
+        clockGroup.opacity = 1;
+        authGroup.opacity = 1;
+        rise.y = 0;
         idle = false;
-        field.clear();
+        capsule.clear();
+        capsule.settle();
         _shown = true;
-        enterAnim.restart();
+        if (animate) enterAnim.restart();
         _focusField();
         idleTimer.restart();
     }
     function _leave() {
         if (!_shown) return;
         _leaving = true;
-        field.clear();
+        capsule.clear();
+        enterAnim.complete();
         leaveAnim.restart();
     }
-    function _focusField() {
-        field.forceActiveFocus(Qt.OtherFocusReason);
-    }
+    function _focusField() { capsule.focusField(); }
     // Any user input: wake from idle and restart the idle countdown.
     function activity() {
         if (!_shown || _leaving) return;
@@ -75,34 +88,33 @@ FocusScope {
         idleTimer.restart();
     }
     function submit() {
-        if (_busy || field.text.length === 0) return;
+        if (_busy || capsule.text.length === 0) return;
         activity();
-        session.unlock(field.text);
+        session.unlock(capsule.text);
+    }
+    function _failed() {
+        capsule.clear();
+        activity();
+        _focusField();
+        capsule.shake();
     }
 
     Connections {
         target: root.session
         function onLockedChanged() {
-            if (root.session.locked) root._enter();
+            if (root.session.locked) root._enter(true);
             else root._leave();
         }
         function onAuthErrorChanged() {
-            if (root.session.authError === "") return;
-            field.clear();
-            root.activity();
-            root._focusField();
-            if (!Theme.reduceMotion) shake.restart();
+            if (root.session.authError !== "" && root._shown) root._failed();
         }
     }
-    Component.onCompleted: if (session.locked && !_shown) _enter()
+    // Already locked when the shell starts: everything is in place at once.
+    Component.onCompleted: if (session.locked && !_shown) _enter(false)
 
     onIdleChanged: {
-        if (idle) {
-            field.clear();
-            field._revealed = false;
-        } else if (_shown) {
-            _focusField();
-        }
+        if (idle) capsule.clear();
+        else if (_shown) _focusField();
     }
 
     Timer {
@@ -112,24 +124,25 @@ FocusScope {
         onTriggered: root.idle = true
     }
 
-    // Typing while focus is elsewhere (e.g. a media button) goes to the field.
+    // Keys nobody handled: printable ones go to the field; every key is
+    // accepted so nothing reaches items (or shortcuts) behind the lock.
     Keys.onPressed: event => {
+        if (!root._shown) return;
         root.activity();
         if (event.key === Qt.Key_Escape) {
-            field.clear();
+            capsule.clear();
             root._focusField();
-            event.accepted = true;
         } else if (event.text.length > 0 && event.text.charCodeAt(0) >= 32
                    && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
-            root._focusField();
-            if (!field.readOnly) field.insert(field.cursorPosition, event.text);
-            event.accepted = true;
+            capsule.typeText(event.text);
         }
+        event.accepted = true;
     }
+    Keys.onReleased: event => { if (root._shown) event.accepted = true; }
+    Keys.onShortcutOverride: event => { if (root._shown) event.accepted = true; }
 
-    // Real pointer movement or a click anywhere wakes it (handlers don't block
-    // input). Qt also sends synthetic hover events when items move under a
-    // still cursor, so only a move of a few pixels counts.
+    // Real pointer movement wakes it. Qt also sends synthetic hover events
+    // when items move under a still cursor, so only a move of a few pixels counts.
     HoverHandler {
         property point _last: Qt.point(-1, -1)
         onPointChanged: {
@@ -140,15 +153,20 @@ FocusScope {
             root.activity();
         }
     }
-    TapHandler {
-        onTapped: { root.activity(); root._focusField(); }
+    // Swallows clicks, wheel and hover so nothing under the lock gets them.
+    MouseArea {
+        anchors.fill: parent
+        enabled: root._shown
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        onPressed: { root.activity(); root._focusField(); }
+        onWheel: wheel => { root.activity(); wheel.accepted = true; }
     }
 
     // ---- surface ---------------------------------------------------------------
     Item {
         id: surface
         anchors.fill: parent
-        transformOrigin: Item.Center
 
         // Opaque base, so nothing under the lock surface ever shows through.
         Rectangle { anchors.fill: parent; color: Theme.bg }
@@ -164,313 +182,257 @@ FocusScope {
             color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, Theme.dark ? 0.45 : 0.32)
         }
 
-        // ---- clock + date (upper center; drifts to the middle when idle) ----
-        Column {
-            id: clockGroup
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: Math.round(parent.height * 0.14)
-            spacing: Theme.space4
-
-            transform: Translate {
-                y: root.idle && !Theme.reduceMotion
-                   ? Math.max(0, Math.round((surface.height - clockGroup.height) / 2 - clockGroup.y - surface.height * 0.04))
-                   : 0
-                Behavior on y {
-                    NumberAnimation { duration: Theme.durLarge; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
-                }
-            }
-
-            Text {
-                id: clockText
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: Services.clock.time
-                font.family: Theme.fontUi
-                font.pixelSize: 104
-                font.weight: 300
-                font.features: { "tnum": 1 }
-                font.letterSpacing: -2
-                color: Theme.text
-                Accessible.role: Accessible.StaticText
-                Accessible.name: qsTr("Time %1").arg(text)
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: Services.clock.longDate
-                font.family: Theme.fontUi
-                font.pixelSize: 20
-                font.weight: 500
-                color: Theme.text
-                Accessible.role: Accessible.StaticText
-                Accessible.name: text
-            }
-        }
-
-        // ---- the user and the password field (lower center) -------------
+        // Everything in front of the wallpaper; lifts on unlock.
         Item {
-            id: card
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: Math.round(parent.height * 0.60 - avatar.height)
-            width: 360
-            height: cardColumn.height
-            opacity: root.idle ? 0 : 1
-            visible: opacity > 0
-            enabled: !root.idle
+            id: scene
+            anchors.fill: parent
+            transform: Translate { id: lift }
 
-            Behavior on opacity {
-                NumberAnimation { duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
-            }
-
+            // ---- clock + date (upper part; drifts to the middle when idle) ----
             Column {
-                id: cardColumn
-                width: parent.width
-                spacing: Theme.space12
+                id: clockGroup
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: Math.round(parent.height * 0.15)
+                spacing: Theme.space4
 
-                Avatar {
-                    id: avatar
+                transform: Translate {
+                    y: root.idle && !Theme.reduceMotion
+                       ? Math.max(0, Math.round((scene.height - clockGroup.height) / 2 - clockGroup.y - scene.height * 0.04))
+                       : 0
+                    Behavior on y {
+                        SpringAnimation {
+                            spring: Theme.liquidSpring; damping: Theme.liquidDamping
+                            mass: Theme.liquidMass; epsilon: Theme.springEpsilon
+                        }
+                    }
+                }
+
+                Text {
+                    id: clockText
                     anchors.horizontalCenter: parent.horizontalCenter
-                    size: 88
-                    source: root.session.avatar
-                    name: root.session.realName
+                    text: Services.clock.time
+                    font.family: Theme.fontUi
+                    readonly property int px: Math.round(Math.max(88, Math.min(160, scene.height * 0.135)))
+                    font.pixelSize: px
+                    font.weight: 250
+                    font.features: { "tnum": 1 }
+                    font.letterSpacing: -px * 0.03
+                    color: Theme.text
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: qsTr("Time %1").arg(text)
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: parent.width
-                    horizontalAlignment: Text.AlignHCenter
-                    text: root.session.realName
-                    elide: Text.ElideRight
-                    font: Theme.typeTitle2
+                    text: Services.clock.longDate
+                    font.family: Theme.fontUi
+                    font.pixelSize: Math.round(clockText.px * 0.16)
+                    font.weight: 500
                     color: Theme.text
-                    Accessible.role: Accessible.Heading
+                    Accessible.role: Accessible.StaticText
                     Accessible.name: text
                 }
+            }
 
-                Item { width: 1; height: Theme.space4 }
+            // ---- the user and the password capsule ---------------------------
+            Item {
+                id: authGroup
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: Math.round(parent.height * 0.62)
+                width: Math.min(parent.width - Theme.space48, 480)
+                height: authColumn.height
+                transform: Translate { id: rise }
 
-                // Field row: a spacer as wide as the submit button keeps the
-                // field itself centered under the avatar.
-                Row {
-                    id: fieldRow
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: Theme.space8
-
-                    transform: Translate { id: shakeShift }
-
-                    Item { width: submitButton.width; height: 1 }
-
-                    TextField {
-                        id: field
-                        width: 264
-                        password: true
-                        placeholderText: qsTr("Password")
-                        readOnly: root._busy
-                        focus: true
-                        // Qt blanks Accessible.name while passwordEdit is set, so
-                        // the label also goes in the description (read by Orca).
-                        Accessible.name: root.a11yLabel
-                        Accessible.description: [root.a11yLabel,
-                                                 root.session.authError,
-                                                 capsRow.visible ? qsTr("Caps Lock is on") : ""]
-                                                .filter(s => s !== "").join(". ")
-
-                        onAccepted: root.submit()
-                        onTextEdited: root.activity()
-                        Keys.onPressed: event => {
-                            root.activity();
-                            if (event.key === Qt.Key_Escape) {
-                                field.clear();
-                                event.accepted = true;
-                            }
-                        }
-
-                        // Spinner over the trailing area while authenticating;
-                        // it also blocks the reveal button.
-                        Rectangle {
-                            x: field.width - width - Theme.space4
-                            y: (36 - height) / 2
-                            width: 28
-                            height: 28
-                            radius: Theme.radiusSm
-                            color: Theme.surface2
-                            visible: root._busy
-                            Spinner {
-                                anchors.centerIn: parent
-                                size: 16
-                                running: parent.visible
-                            }
-                            MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
-                        }
-                    }
-
-                    IconButton {
-                        id: submitButton
-                        size: 36
-                        iconSize: 18
-                        variant: "accent"
-                        iconName: "arrow-right"
-                        tooltip: qsTr("Unlock")
-                        enabled: field.length > 0 && !root._busy
-                        disabledReason: root._busy ? qsTr("Checking your password") : qsTr("Type your password first")
-                        focusPolicy: Qt.TabFocus
-                        onClicked: root.submit()
-                    }
-                }
-
-                // Messages: fixed-height slot so the layout never jumps.
                 Item {
-                    width: parent.width
-                    height: 64
+                    id: authFade
+                    anchors.fill: parent
+                    opacity: root.idle ? 0 : 1
+                    visible: opacity > 0
+                    enabled: !root.idle
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+                    }
 
                     Column {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        spacing: Theme.space8
+                        id: authColumn
+                        width: parent.width
+                        spacing: Theme.space12
 
-                        Message {
-                            id: errorRow
+                        Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            visible: root.session.authError !== "" && !root._busy
-                            iconName: "circle-alert"
-                            iconColor: Theme.danger
-                            textColor: Theme.danger
-                            text: root.session.authError
-                            Accessible.role: Accessible.AlertMessage
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: root.session.realName
+                            elide: Text.ElideRight
+                            font: Theme.typeTitle3
+                            color: Theme.text
+                            Accessible.role: Accessible.Heading
+                            Accessible.name: text
                         }
-                        Message {
-                            id: capsRow
+                        AuthCapsule {
+                            id: capsule
                             anchors.horizontalCenter: parent.horizontalCenter
-                            visible: Services.keyboard.capsLock
-                            iconName: "arrow-big-up"
-                            iconColor: Theme.warning
-                            textColor: Theme.text
-                            text: qsTr("Caps Lock is on")
+                            focus: true
+                            avatarSource: root.session.avatar
+                            avatarName: root.session.realName
+                            a11yLabel: root.a11yLabel
+                            submitTooltip: qsTr("Unlock")
+                            busy: root._busy
+                            errorText: root.session.authError
+                            capsLock: Services.keyboard.capsLock
+                            maxMessageWidth: authGroup.width
+                            onSubmitted: root.submit()
+                            onEdited: root.activity()
+                            onActivity: root.activity()
                         }
                     }
                 }
             }
-        }
 
-        // ---- bottom: media (left), status (right) ------------------------
-        GlassPanel {
-            id: mediaPill
-            anchors.left: parent.left
-            anchors.bottom: parent.bottom
-            anchors.margins: Theme.space24
-            radius: height / 2
-            elevation: "none"
-            width: mediaRow.implicitWidth + Theme.space8 * 2 + Theme.space8
-            height: 44
-            visible: Services.media.hasPlayer && opacity > 0
-            opacity: root.idle ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durLarge) } }
-
-            Row {
-                id: mediaRow
-                anchors.verticalCenter: parent.verticalCenter
-                x: Theme.space16
-                spacing: Theme.space4
+            // ---- bottom left: media, compact -------------------------------
+            Island {
+                id: mediaIsland
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.space16
+                interactive: false
+                animateWidth: false
+                leftPadding: Theme.space12
+                rightPadding: Theme.space2
+                spacing: Theme.space2
+                text: qsTr("Media")
+                visible: Services.media.hasPlayer && opacity > 0
+                opacity: root.idle ? 0 : 1
+                Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durLarge) } }
 
                 Icon {
                     anchors.verticalCenter: parent.verticalCenter
                     name: "music-2"
-                    size: 16
+                    size: 14
                     color: Theme.textMuted
                 }
                 Item { width: Theme.space4; height: 1 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, 260)
+                    width: Math.min(implicitWidth, Math.max(80, Math.min(240, scene.width * 0.2)))
                     elide: Text.ElideRight
                     text: Services.media.artist !== ""
                           ? qsTr("%1 · %2").arg(Services.media.title).arg(Services.media.artist)
                           : Services.media.title
-                    font: Theme.typeBodyStrong
+                    font: Theme.typeLabel
                     color: Theme.text
                     Accessible.role: Accessible.StaticText
                     Accessible.name: qsTr("Now playing: %1").arg(text)
                 }
-                Item { width: Theme.space8; height: 1 }
+                Item { width: Theme.space4; height: 1 }
                 IconButton {
                     anchors.verticalCenter: parent.verticalCenter
-                    iconName: "skip-back"; iconSize: 16
+                    iconName: "skip-back"; iconSize: 14
                     tooltip: qsTr("Previous track")
                     focusPolicy: Qt.TabFocus
-                    onClicked: Services.media.previous()
+                    onClicked: { root.activity(); Services.media.previous(); }
                 }
                 IconButton {
                     anchors.verticalCenter: parent.verticalCenter
-                    iconName: Services.media.playing ? "pause" : "play"; iconSize: 16
+                    iconName: Services.media.playing ? "pause" : "play"; iconSize: 14
                     tooltip: Services.media.playing ? qsTr("Pause") : qsTr("Play")
                     focusPolicy: Qt.TabFocus
-                    onClicked: Services.media.playPause()
+                    onClicked: { root.activity(); Services.media.playPause(); }
                 }
                 IconButton {
                     anchors.verticalCenter: parent.verticalCenter
-                    iconName: "skip-forward"; iconSize: 16
+                    iconName: "skip-forward"; iconSize: 14
                     tooltip: qsTr("Next track")
                     focusPolicy: Qt.TabFocus
-                    onClicked: Services.media.next()
+                    onClicked: { root.activity(); Services.media.next(); }
                 }
             }
-        }
 
-        GlassPanel {
-            id: statusPill
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: Theme.space24
-            radius: height / 2
-            elevation: "none"
-            width: statusRow.implicitWidth + Theme.space16 * 2
-            height: 44
-            opacity: root.idle ? 0 : 1
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durLarge) } }
-
+            // ---- bottom right: status, sleep ---------------------------------
             Row {
-                id: statusRow
-                anchors.verticalCenter: parent.verticalCenter
-                x: Theme.space16
-                spacing: Theme.space16
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.space16
+                spacing: Theme.space8
+                opacity: root.idle ? 0 : 1
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durLarge) } }
 
-                StatusItem {
-                    visible: Services.notifications.count > 0
-                    iconName: "bell"
-                    text: Services.notifications.count === 1 ? qsTr("1 notification")
-                          : qsTr("%1 notifications").arg(Services.notifications.count)
-                }
-                Button {
-                    anchors.verticalCenter: parent.verticalCenter
-                    variant: "ghost"
-                    size: "sm"
-                    iconName: "keyboard"
-                    text: Services.keyboard.current.toUpperCase()
-                    focusPolicy: Qt.TabFocus
-                    Accessible.name: qsTr("Keyboard layout %1. Switch layout").arg(text)
-                    onClicked: Services.keyboard.next()
-                }
-                StatusItem {
-                    visible: Services.power.hasBattery
-                    iconName: {
-                        const p = Services.power;
-                        if (p.charging) return "battery-charging";
-                        if (p.batteryPercent >= 85) return "battery-full";
-                        if (p.batteryPercent >= 40) return "battery-medium";
-                        if (p.batteryPercent >= 15) return "battery-low";
-                        return "battery-warning";
+                Island {
+                    id: statusIsland
+                    interactive: false
+                    animateWidth: false
+                    visible: notifItem.visible || layoutButton.visible || batteryItem.visible
+                    leftPadding: notifItem.visible || !layoutButton.visible ? Theme.space12 : Theme.space2
+                    rightPadding: batteryItem.visible || !layoutButton.visible ? Theme.space12 : Theme.space2
+                    spacing: Theme.space8
+                    text: qsTr("Status")
+
+                    StatusItem {
+                        id: notifItem
+                        visible: Services.notifications.count > 0
+                        iconName: "bell"
+                        text: Services.notifications.count > 99 ? "99+" : String(Services.notifications.count)
+                        label: Services.notifications.count === 1 ? qsTr("1 notification")
+                               : qsTr("%1 notifications").arg(Services.notifications.count)
                     }
-                    iconColor: !Services.power.charging && Services.power.batteryPercent < 15 ? Theme.danger : Theme.text
-                    text: Services.power.batteryPercent + "%"
-                    tnum: true
-                    Accessible.name: Services.power.charging
-                                     ? qsTr("Battery %1%, charging").arg(Services.power.batteryPercent)
-                                     : qsTr("Battery %1%").arg(Services.power.batteryPercent)
+                    LabelButton {
+                        id: layoutButton
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: Services.keyboard.layouts.length > 1
+                        text: Services.keyboard.current.toUpperCase()
+                        tooltip: qsTr("Keyboard layout %1. Switch layout").arg(text)
+                        onClicked: { root.activity(); Services.keyboard.next(); root._focusField(); }
+                    }
+                    StatusItem {
+                        id: batteryItem
+                        visible: Services.power.hasBattery
+                        iconName: {
+                            const p = Services.power;
+                            if (p.charging) return "battery-charging";
+                            if (p.batteryPercent >= 85) return "battery-full";
+                            if (p.batteryPercent >= 40) return "battery-medium";
+                            if (p.batteryPercent >= 15) return "battery-low";
+                            return "battery-warning";
+                        }
+                        iconColor: !Services.power.charging && Services.power.batteryPercent < 15 ? Theme.danger : Theme.text
+                        text: Services.power.batteryPercent + "%"
+                        label: Services.power.charging
+                               ? qsTr("Battery %1%, charging").arg(Services.power.batteryPercent)
+                               : qsTr("Battery %1%").arg(Services.power.batteryPercent)
+                    }
+                }
+
+                Island {
+                    id: sleepIsland
+                    visible: root.session.canSuspend
+                    width: height
+                    animateWidth: false
+                    padding: 0
+                    text: qsTr("Sleep")
+                    onClicked: { root.activity(); root.session.suspend(); }
+
+                    Item {
+                        width: Theme.islandHeight
+                        height: Theme.islandHeight
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "moon"
+                            size: 16
+                            color: Theme.text
+                        }
+                    }
+                    Tooltip {
+                        text: qsTr("Sleep")
+                        visible: sleepIsland.hovered || sleepIsland.visualFocus
+                    }
                 }
             }
         }
     }
 
     // ---- animations ------------------------------------------------------------
-    // Foreground settles in when the screen locks; the opaque base is drawn
-    // at once so nothing behind ever shows.
+    // Locking at run time: the opaque base is there at once (nothing behind
+    // ever shows); the clock fades in and the capsule rises into place.
     ParallelAnimation {
         id: enterAnim
         NumberAnimation {
@@ -478,11 +440,17 @@ FocusScope {
             duration: Theme.dur(Theme.durMedium); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
         NumberAnimation {
-            target: cardColumn; property: "opacity"; from: 0; to: 1
+            target: authGroup; property: "opacity"; from: 0; to: 1
             duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+        }
+        SpringAnimation {
+            target: rise; property: "y"; from: Theme.reduceMotion ? 0 : 20; to: 0
+            spring: Theme.liquidSpring; damping: Theme.liquidDamping
+            mass: Theme.liquidMass; epsilon: Theme.springEpsilon
         }
     }
 
+    // Unlock: the scene lifts and the whole surface fades.
     ParallelAnimation {
         id: leaveAnim
         NumberAnimation {
@@ -490,76 +458,30 @@ FocusScope {
             duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
         NumberAnimation {
-            target: surface; property: "scale"; to: Theme.reduceMotion ? 1 : 1.04
-            duration: Theme.durLarge; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+            target: lift; property: "y"; to: Theme.reduceMotion ? 0 : -Math.round(root.height * 0.06)
+            duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
         onFinished: {
             root._leaving = false;
             root._shown = false;
             root.idle = false;
             surface.opacity = 1;
-            surface.scale = 1;
+            lift.y = 0;
         }
-    }
-
-    // Three quick oscillations, decaying.
-    SequentialAnimation {
-        id: shake
-        NumberAnimation { target: shakeShift; property: "x"; to: -10; duration: 45; easing.type: Easing.OutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 10; duration: 70; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: -7; duration: 65; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 7; duration: 60; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: -3; duration: 55; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 0; duration: 50; easing.type: Easing.OutQuad }
     }
 
     // ---- local pieces ----------------------------------------------------------
-    // Inline message on a small solid pill (keeps danger/warning text AA on
-    // any wallpaper), always with an icon.
-    component Message: Rectangle {
-        id: msg
-        property string iconName
-        property color iconColor
-        property color textColor
-        property string text
-        width: msgRow.implicitWidth + Theme.space12 * 2
-        height: 28
-        radius: height / 2
-        color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.88)
-        border.width: 1
-        border.color: Theme.glassBorder
-        Accessible.name: text
-
-        Row {
-            id: msgRow
-            anchors.centerIn: parent
-            spacing: Theme.space8
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: msg.iconName
-                size: 14
-                color: msg.iconColor
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: msg.text
-                font: Theme.typeBodyStrong
-                color: msg.textColor
-                Accessible.ignored: true
-            }
-        }
-    }
-
+    // Icon + short value inside an island, with a tooltip and a full name.
     component StatusItem: Row {
         id: si
         property string iconName
         property color iconColor: Theme.text
         property string text
-        property bool tnum: false
+        property string label: text
         anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-        spacing: Theme.space8
+        spacing: Theme.space4 + Theme.space2
         Accessible.role: Accessible.StaticText
-        Accessible.name: text
+        Accessible.name: label
 
         Icon {
             anchors.verticalCenter: parent.verticalCenter
@@ -570,9 +492,47 @@ FocusScope {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: si.text
-            font: si.tnum ? Theme.typeBodyTnum : Theme.typeBodyStrong
+            font: Theme.typeLabelTnum
             color: Theme.text
             Accessible.ignored: true
+        }
+        HoverHandler { id: siHover }
+        Tooltip {
+            text: si.label
+            visible: siHover.hovered
+        }
+    }
+
+    // Short text button inside an island (the keyboard layout).
+    component LabelButton: T.Button {
+        id: lb
+        property string tooltip
+        implicitWidth: Math.max(Theme.hitTarget, lbText.implicitWidth + Theme.space8 * 2)
+        implicitHeight: Theme.hitTarget
+        padding: 0
+        focusPolicy: Qt.TabFocus
+        hoverEnabled: true
+        Accessible.role: Accessible.Button
+        Accessible.name: tooltip
+
+        background: Rectangle {
+            radius: height / 2
+            color: lb.down ? Theme.pressedOverlay : lb.hovered ? Theme.hoverOverlay : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.durMicro } }
+            FocusRing { show: lb.visualFocus }
+        }
+        contentItem: Item {
+            Text {
+                id: lbText
+                anchors.centerIn: parent
+                text: lb.text
+                font: Theme.typeLabel
+                color: Theme.text
+            }
+        }
+        Tooltip {
+            text: lb.tooltip
+            visible: lb.hovered || lb.visualFocus
         }
     }
 }
