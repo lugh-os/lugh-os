@@ -1,0 +1,3 @@
+# Repo paths copied into the build tree (scripts/build-debs.sh). The Rust
+# sources are not copied: debian/rules builds them in the checkout.
+ui/greeter/qml
