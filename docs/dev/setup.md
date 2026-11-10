@@ -113,6 +113,7 @@ Run `make` or `make help` for the list. Outputs go to `out/` (git-ignored).
 | `make run-bios` | Same with legacy BIOS (`-machine pc`, SeaBIOS). |
 | `make test-boot` | Headless boot in all three modes; waits for `LUGH-BOOT-OK` on the serial console (180 s with KVM, 600 s without). Writes `out/serial-<mode>.log` and `out/boot-times.json`, prints a table, fails if any mode fails. See [tests/boot](../../tests/boot/README.md). |
 | `make test-boot-uefi` / `-uefi-sb` / `-bios` | One mode only. |
+| `make test-desktop` | Boots the ISO to the Lugh desktop and drives it (launcher, control center, lock, logout, login); screenshots in `out/vm-shots/`. See [testing-desktop](testing-desktop.md). |
 | `make clean` | Removes `out/` and runs `lb clean` in `iso/` (inside the container, since those files can be root-owned). Keeps `iso/cache/`, so the next build doesn't re-download every package. Never touches tracked files. Note that it also removes the throwaway dev signing key in `out/`. |
 
 Useful variables: `ISO=path/to.iso` (default `out/lugh.iso`) for the run and
