@@ -139,3 +139,20 @@ Status values: **Accepted**, **Proposed** (not yet confirmed), **Superseded by A
 **Alternatives:** pin an older hyprlang-based release in the Lugh repo (packaging burden, dead end at 0.57).
 **Consequences:** `scripts/verify-config.sh` checks the config against backports and sid. Details in [dev/hyprland.md](dev/hyprland.md).
 
+## ADR-027: One JSON bridge between the QML shell and a Qt-free Rust core
+**Status:** Accepted, 2026-11-10
+**Decision:** The shell's system services live in `lugh-shell-core::services` (plain Rust: zbus, tokio, no Qt). They reach QML through one small JSON protocol (state patches, signals, calls; [specs/shell-bridge.md](specs/shell-bridge.md)) instead of one cxx-qt QObject and list model per service. Production runs the core in-process behind a single cxx-qt object (`LughBackend`); development can run it as `lugh-shell-devd` over a WebSocket so the QML preview uses a real machine's services.
+**Alternatives:** per-service cxx-qt QObjects with `QAbstractListModel`s in Rust (far more glue and `unsafe`, untestable without Qt); a separate daemon in production (two processes and IPC on every keystroke for no gain).
+**Consequences:** services are unit-testable and runnable from a CLI (`examples/svc_dump`); the QML contract is identical on mock and real data; state sizes must stay small (they are JSON). Adding a service is one Rust module and one QML object.
+
+## ADR-028: Lugh mode gets its own "Liquid" design language
+**Status:** Accepted, 2026-11-10 (founder direction: floaty, liquid, compact, not generic)
+**Decision:** Lugh mode drops the full-width top bar for floating glass islands, opens every panel by morphing out of the island that was touched, and goes icon-first and compact with expandable detail ([design/lugh-mode.md](design/lugh-mode.md)). The center island doubles as the OSD. The earlier full-width bar is kept for the future Mac-like mode; a Windows-like mode follows later. Lugh mode is the one being built and optimized now.
+**Consequences:** DESIGN-SYSTEM §8's "Lugh" column is superseded by the design doc for bar, launcher, control center and OSD. Tokens (`Theme.liquid*`, `Theme.island*`) and components (`Island`, `MorphPanel`, `IconToggle`, `Chip`, `Drawer`, `Squish`) are added to LughUI.
+
+## ADR-029: Phase 1 lock screen is a shell overlay with PAM; ext-session-lock follows
+**Status:** Accepted, 2026-11-10
+**Decision:** The lock screen is the shell's own QML surface on the overlay layer with exclusive keyboard on every output, authenticating through PAM. The locked state is persisted in `$XDG_RUNTIME_DIR/lugh/locked`, so a restarted shell shows the lock before anything else (systemd restarts it in ~200 ms).
+**Why not ext-session-lock-v1 now:** Qt has no client for it; it needs a QtWayland shell-integration plugin in C++ that could not be verified on a real compositor in this phase.
+**Consequences:** a shell crash exposes the desktop for a fraction of a second. Closing that gap with `ext-session-lock-v1` is tracked for the security review before beta (phase-1 risk table).
+
