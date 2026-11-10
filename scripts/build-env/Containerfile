@@ -8,7 +8,10 @@ FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    RUSTUP_HOME=/root/.rustup \
+    CARGO_HOME=/root/.cargo \
+    PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -22,5 +25,24 @@ RUN apt-get update \
       ca-certificates curl rsync \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
+
+# lugh-shell and lugh-greeter (Rust + cxx-qt + Qt 6, see docs/dev/packaging.md):
+# the Qt 6 dev packages, PAM headers for the lock screen, and what their
+# package builds call (dbus-run-session for `--check`, desktop-file-validate).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      pkg-config cmake git \
+      qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+      libpam0g-dev \
+      dbus-daemon dbus-bin desktop-file-utils \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# rustup only. The toolchain named in rust-toolchain.toml is installed at build
+# time (`rustup toolchain install`) into the lugh-hello-rustup volume that
+# scripts/lib/container.sh mounts on /root/.rustup, so a toolchain bump does not
+# rebuild this image and the download is shared with `make shell` / `make hello`.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
 
 WORKDIR /src
