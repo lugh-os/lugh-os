@@ -212,8 +212,10 @@ workspace and focuses it.
 
   Springs (DESIGN-SYSTEM's stiffness 400 / damping 32) aren't used yet, because
   their Lua field name changed between 0.55 and 0.57.
-- If the shell wants to own all motion of its pop-up surfaces (QML fades only),
-  enable `lugh.rules.shell_noanim:set_enabled(true)`. It is off by default.
+- The shell owns the motion of its own surfaces (QML liquid motion): the
+  rule `lugh.rules.shell_noanim` turns compositor animations off for the
+  `lugh-*` layers. `lugh.rules.shell_noanim:set_enabled(false)` in `user.lua`
+  brings the compositor fades back.
 
 ## 5. Performance
 
@@ -259,7 +261,16 @@ Why not `hyprctl keyword`: with the Lua config manager the config is a program.
 A reload keeps one source of truth, and keywords set at runtime would be lost
 on the next reload anyway.
 
-Expected triggers: power-profiles-daemon switching to `power-saver`, low
+**Software rendering turns it on automatically.** When Hyprland is up,
+`lugh-session --ready` looks for a software rasterizer (llvmpipe, softpipe) in
+Hyprland's log. If it finds one it sets the flag, reloads the config, exports
+`LUGH_LOW_POWER=1` to the user manager (the shell starts with
+`Services.shell.lowPower`: opaque panels, reduced motion) and lifts
+`lugh-shell.service`'s memory limits for this login, because a software
+rasterizer keeps all textures in the shell's own memory (300–550 MB).
+`LUGH_LOW_POWER=0` in the session environment turns the detection off.
+
+Other expected triggers: power-profiles-daemon switching to `power-saver`, low
 battery, or a GPU known to be weak. The flag is per login: the shell sets it
 again at start-up. When blur is off, glass surfaces should switch to an opaque
 fill. The shell can check with `hyprctl getoption decoration:blur:enabled`.
