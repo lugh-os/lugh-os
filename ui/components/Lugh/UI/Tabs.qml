@@ -5,7 +5,8 @@
 // Tabs keep their natural width, left-aligned, over a 1 px hairline. The
 // current tab has accent-text label and a 2 px accent underline that slides
 // between tabs (fade only under reduce motion). Left/Right/Home/End move
-// between tabs when one has keyboard focus.
+// between tabs when one has keyboard focus. When the tabs don't fit, the strip
+// flicks, keeps the current tab in view and fades at the overflowing edge.
 import QtQuick
 import QtQuick.Templates as T
 
@@ -13,6 +14,9 @@ T.TabBar {
     id: control
 
     property var model: []
+    // Color the overflow edge fades blend into: set it to the surface the
+    // tabs sit on when that is not Theme.bg.
+    property color _fadeColor: Theme.bg
 
     function _focusTab(i) {
         if (i < 0 || i >= count) return;
@@ -89,6 +93,10 @@ T.TabBar {
     }
 
     contentItem: ListView {
+        id: strip
+        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+        EdgeFade { opacity: strip.interactive && !strip.atXBeginning ? 1 : 0 }
+        EdgeFade { atStart: false; x: strip.width - width; opacity: strip.interactive && !strip.atXEnd ? 1 : 0 }
         model: control.contentModel
         currentIndex: control.currentIndex
         spacing: control.spacing
@@ -123,6 +131,25 @@ T.TabBar {
                 height: 2
                 radius: 1
                 color: Theme.accent
+            }
+        }
+    }
+
+    // Overflow: the strip flicks; a fade on each edge that has more tabs
+    // replaces the hard cut.
+    component EdgeFade: Rectangle {
+        property bool atStart: true
+        width: Theme.space32
+        height: strip.height - 1
+        z: 3
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durMicro) } }
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: atStart ? 0 : 1; color: control._fadeColor }
+            GradientStop {
+                position: atStart ? 1 : 0
+                color: Qt.rgba(control._fadeColor.r, control._fadeColor.g, control._fadeColor.b, 0)
             }
         }
     }
