@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lugh
+Comment=The Lugh desktop
+Exec=lugh-session
+TryExec=lugh-session
+DesktopNames=Lugh;Hyprland
+Keywords=lugh;wayland;desktop;
