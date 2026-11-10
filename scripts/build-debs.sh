@@ -7,11 +7,24 @@
 # For each packaging/<pkg>/debian/ (packaging/repo/ is not a package) a source
 # tree is assembled in out/build/<pkg>/:
 #   debian/    copy of packaging/<pkg>/debian/
-#   branding/  copy of the repo's branding/
+#   <path>     copy of every repo path listed in debian/lugh-sources
 # and built with `dpkg-buildpackage -us -uc -b` inside the build container
 # (scripts/lib/container.sh). lintian runs on each result: its findings are
 # printed, and the build fails only on lintian errors. The .deb files land in
 # out/debs/; .changes/.buildinfo and lintian.log stay in out/build/<pkg>.result/.
+#
+# debian/lugh-sources: one repo-relative path per line (file or directory,
+# `#` comments and blank lines ignored). Each is copied to the same relative
+# path in the build tree, so debian/install reads like the repo layout.
+#
+# Version: every package gets <VERSION file>.<LUGH_DEB_PATCH, default 1>
+# (0.0 -> 0.0.1); the top entry of debian/changelog is restamped in the build
+# tree. Set LUGH_DEB_VERSION to give the full version yourself.
+#
+# lugh-shell and lugh-greeter (Rust + cxx-qt) build their binary from the
+# checkout through scripts/build-env/cargo-deb-build.sh, which reuses an
+# up-to-date out/bin/<name> (docs/dev/packaging.md). Packages are built in
+# dependency-free order; none needs another Lugh package to build.
 #
 # Missing Build-Depends are installed from Debian with apt (needs network) and
 # reported, so they can be added to scripts/build-env/Containerfile.
@@ -35,6 +48,44 @@ list_packages() {
   done
 }
 
+# Copy the repo paths listed in debian/lugh-sources into the build tree.
+copy_sources() {
+  local pkg="$1" work="$2" list="$2/debian/lugh-sources" line path
+  [[ -f "$list" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    read -r path _ <<<"$line" || true
+    [[ -n "${path:-}" ]] || continue
+    [[ "$path" != /* && "$path" != *..* ]] ||
+      die "$pkg: debian/lugh-sources: '$path' must be a path inside the repo"
+    [[ -e "$REPO_ROOT/$path" ]] ||
+      die "$pkg: debian/lugh-sources: $path does not exist in the repo"
+    mkdir -p "$work/$(dirname "$path")"
+    cp -a "$REPO_ROOT/$path" "$work/$path"
+  done <"$list"
+}
+
+# Package version from the repo's VERSION file.
+deb_version() {
+  if [[ -n "${LUGH_DEB_VERSION:-}" ]]; then
+    printf '%s\n' "$LUGH_DEB_VERSION"
+    return
+  fi
+  local v
+  v="$(tr -d '[:space:]' <"$REPO_ROOT/VERSION")" || die "cannot read VERSION"
+  [[ -n "$v" ]] || die "VERSION is empty"
+  printf '%s.%s\n' "$v" "${LUGH_DEB_PATCH:-1}"
+}
+
+# Restamp the top changelog entry in the build tree with deb_version.
+stamp_version() {
+  local pkg="$1" work="$2" version
+  version="$(deb_version)"
+  sed -i -E "1s/^([^ ]+) \\([^)]*\\)/\\1 (${version})/" "$work/debian/changelog"
+  head -n1 "$work/debian/changelog" | grep -qF "($version)" ||
+    die "$pkg: could not set the version in debian/changelog"
+}
+
 build_one() {
   local pkg="$1"
   local build="$REPO_ROOT/out/build"
@@ -45,11 +96,8 @@ build_one() {
   rm -rf "$work" "$result"
   mkdir -p "$work" "$result"
   cp -a "$REPO_ROOT/packaging/$pkg/debian" "$work/debian"
-  if [[ -d "$REPO_ROOT/branding" ]]; then
-    cp -a "$REPO_ROOT/branding" "$work/branding"
-  else
-    warn "no branding/ directory in the repo; building $pkg without it"
-  fi
+  copy_sources "$pkg" "$work"
+  stamp_version "$pkg" "$work"
 
   (
     cd "$work"
@@ -60,7 +108,8 @@ build_one() {
       apt-get update -qq
       apt-get build-dep -y -qq --no-install-recommends ./ >/dev/null
     fi
-    dpkg-buildpackage -us -uc -b
+    LUGH_REPO_ROOT="$REPO_ROOT" DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-noautodbgsym}" \
+      dpkg-buildpackage -us -uc -b
   )
 
   # dpkg-buildpackage writes its results next to the source tree, in out/build/.
