@@ -1,0 +1,27 @@
+Source: lugh-greeter
+Section: x11
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: config-package-dev (>= 5.0), debhelper-compat (= 13), cmake, libpam0g-dev, pkgconf, qt6-base-dev, qt6-declarative-dev, qt6-declarative-dev-tools
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-greeter
+Architecture: amd64
+Depends: adduser,
+         cage,
+         greetd,
+         lugh-branding (>= ${source:Version}),
+         lugh-ui (= ${source:Version}),
+         qml6-module-qtquick-effects,
+         qt6-wayland,
+         tuigreet,
+         ${misc:Depends},
+         ${shlibs:Depends}
+Provides: ${diverted-files}
+Conflicts: ${diverted-files}
+Description: Lugh sign-in screen
+ The graphical login of Lugh OS: a Qt 6 / QML greeter that greetd runs inside
+ the cage kiosk compositor. Debian's /etc/greetd/config.toml is diverted, not
+ overwritten. If the greeter fails three times in a row, the text greeter
+ tuigreet is started instead, so a login is always possible.
