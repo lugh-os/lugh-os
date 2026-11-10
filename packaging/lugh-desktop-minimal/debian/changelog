@@ -1,0 +1,5 @@
+lugh-desktop-minimal (0.0.1) trixie; urgency=medium
+
+  * Initial release: the Minimal desktop profile.
+
+ -- Lugh Developers <dev@lugh.example>  Tue, 10 Nov 2026 12:00:00 +0000
