@@ -20,7 +20,11 @@ Item {
     readonly property bool _isFile: iconName.startsWith("/") || iconName.indexOf("://") > 0
     readonly property int _px: Math.round(size * Screen.devicePixelRatio)
     readonly property Item _art: _isFile ? fileImage : themeImage
-    readonly property bool found: iconName !== "" && _art.status === Image.Ready
+    // Qt hands back the theme's "image-missing" glyph for unknown names, so ask
+    // the host (LughNative, only in lugh-shell) whether the theme really has it.
+    readonly property bool _inTheme: _isFile || typeof LughNative === "undefined" || !LughNative
+        || typeof LughNative.hasThemeIcon !== "function" || LughNative.hasThemeIcon(iconName)
+    readonly property bool found: iconName !== "" && _inTheme && _art.status === Image.Ready
     readonly property bool _loading: _art.status === Image.Loading
     // Wide/tall artwork (aspect off by >10%) gets the plate and an inset.
     readonly property bool _nonSquare: found && _art.implicitWidth > 0 && _art.implicitHeight > 0
@@ -65,7 +69,7 @@ Item {
         anchors.fill: parent
         anchors.margins: _inset
         visible: !root._isFile && root.found
-        name: root._isFile ? "" : root.iconName
+        name: root._isFile || !root._inTheme ? "" : root.iconName
         sourceSize: Qt.size(root._px, root._px)
         fillMode: Image.PreserveAspectFit
         smooth: true
