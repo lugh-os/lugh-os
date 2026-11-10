@@ -1,13 +1,13 @@
-// The Lugh menu (shell spec §Top bar: logo menu). A fullscreen overlay root:
-// the frame anchors it to every screen edge and maps it while `shown`.
+// The Lugh menu (docs/design/lugh-mode.md: grows out of the logo island). A
+// fullscreen overlay root: the frame anchors it to every screen edge and maps
+// it while `shown`; it takes the keyboard while `wantsKeyboard`.
 //
 //   LughMenu { anchors.fill: parent }    // opens with ShellState.lughMenuOpen
 //
-// The glass panel sits at the top-left, just under the bar. Outside click or
-// Esc closes it (ShellState.closeAll()). Keyboard: Up/Down/Home/End/Tab move,
-// Enter/Space activate; the first enabled row is current on open. Enter =
-// fade + scale 0.96 → 1 from the top-left in durSmall; exit = a short fade
-// (fade only under reduce motion).
+// A MorphPanel springs from ShellState.logoIsland to a compact panel hanging
+// 6 px under it. Outside click or Esc closes it (ShellState.closeAll()).
+// Keyboard: Up/Down/Home/End/Tab move, Enter/Space activate; the first enabled
+// row is current on open.
 //
 // Log out / Restart / Shut down ask first in a modal Dialog that this overlay
 // keeps up after the panel closes (`shown` stays true until it is answered).
@@ -21,22 +21,21 @@ Item {
 
     readonly property bool open: ShellState.lughMenuOpen
     // True while the panel is open or animating out, or a confirmation is up.
-    readonly property bool shown: open || _t > 0 || pendingConfirm !== ""
+    readonly property bool shown: morph.shown || pendingConfirm !== ""
     readonly property bool wantsKeyboard: open || pendingConfirm !== ""
 
     // "" | "logout" | "restart" | "shutdown"
     property string pendingConfirm: ""
-    // Panel presence 0 → 1; drives opacity and scale.
-    property real _t: open ? 1 : 0
-    Behavior on _t {
-        NumberAnimation {
-            duration: root.open ? Theme.dur(Theme.durSmall) : Theme.dur(Theme.durMicro)
-            easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.easeStandard
-        }
-    }
 
-    readonly property int barHeight: 30
+    readonly property int panelWidth: 232
+    readonly property int pad: Theme.space4 + Theme.space2
+    readonly property int rowHeight: 36
+    readonly property int headerHeight: 44
+    readonly property int separatorHeight: 9
+    readonly property bool canSuspend: Services.session.canSuspend
+    // Known without loading the content, so the morph has its target at once.
+    readonly property int panelHeight: 2 * pad + headerHeight + 2 * separatorHeight
+                                       + (canSuspend ? 7 : 6) * rowHeight
 
     function _ask(kind) {
         ShellState.closeAll();
@@ -54,24 +53,29 @@ Item {
         onPressed: ShellState.closeAll()
     }
 
-    Loader {
-        id: content
+    MorphPanel {
+        id: morph
         anchors.fill: parent
-        active: root.shown
-        sourceComponent: Item {
-            FocusScope {
+        open: root.open
+        originRect: ShellState.logoIsland
+        targetRect: Qt.rect(ShellState.logoIsland.x,
+                            ShellState.logoIsland.y + ShellState.logoIsland.height + Theme.space4 + Theme.space2,
+                            root.panelWidth, root.panelHeight)
+        radius: Theme.radiusXl
+        elevation: "popover"
+
+        Loader {
+            anchors.fill: parent
+            active: morph.shown
+            sourceComponent: FocusScope {
                 id: panel
 
                 // Index into `rows` of the keyboard/hover-current row.
                 property int current: -1
-                readonly property var rows: [settingsRow, storeRow, lockRow, logoutRow, restartRow, shutdownRow]
-                readonly property int pad: Theme.space4 + Theme.space2
+                readonly property var rows: root.canSuspend
+                    ? [settingsRow, storeRow, lockRow, sleepRow, logoutRow, restartRow, shutdownRow]
+                    : [settingsRow, storeRow, lockRow, logoutRow, restartRow, shutdownRow]
 
-                function _first() {
-                    for (let i = 0; i < rows.length; ++i)
-                        if (rows[i].actionable) return i;
-                    return -1;
-                }
                 function move(step) {
                     const n = rows.length;
                     let i = current;
@@ -89,20 +93,11 @@ Item {
                         rows[current].triggered();
                 }
                 function reset() {
-                    current = _first();
+                    edge(false);
                     forceActiveFocus();
                 }
 
-                x: Theme.space8
-                y: root.barHeight + Theme.space4 + Theme.space2
-                width: 240
-                height: column.implicitHeight + 2 * pad
                 focus: true
-                opacity: root._t
-                visible: opacity > 0
-                scale: Theme.reduceMotion || !root.open ? 1 : 0.96 + 0.04 * root._t
-                transformOrigin: Item.TopLeft
-
                 Keys.onUpPressed: move(-1)
                 Keys.onDownPressed: move(1)
                 Keys.onTabPressed: move(1)
@@ -122,50 +117,57 @@ Item {
                     function onOpenChanged() { if (root.open) panel.reset(); }
                 }
 
-                GlassPanel {
-                    anchors.fill: parent
-                    radius: Theme.radiusMd
-                    elevation: "menu"
+                component Row_: LughMenuRow {
+                    id: menuRow
+                    width: parent.width
+                    height: root.rowHeight
+                    current: panel.current >= 0 && panel.rows[panel.current] === menuRow
+                    onHoveredIn: panel.current = panel.rows.indexOf(menuRow)
                 }
-                // Clicks on the panel's padding and header must not reach the
-                // outside-click handler.
-                MouseArea { anchors.fill: parent }
+                component Hairline: Item {
+                    width: parent.width
+                    height: root.separatorHeight
+                    Rectangle {
+                        x: Theme.space12 - Theme.space2
+                        y: Theme.space4
+                        width: parent.width - 2 * x
+                        height: 1
+                        color: Theme.border
+                        opacity: 0.7
+                    }
+                }
 
                 Column {
-                    id: column
-                    x: panel.pad
-                    y: panel.pad
-                    width: parent.width - 2 * panel.pad
+                    x: root.pad
+                    y: root.pad
+                    width: parent.width - 2 * root.pad
 
-                    // About header: what this machine runs. Informational.
+                    // What this machine runs. Informational.
                     Item {
                         width: parent.width
-                        height: 52
+                        height: root.headerHeight
                         Accessible.role: Accessible.StaticText
                         Accessible.name: qsTr("About Lugh: %1").arg(Services.session.osVersion)
 
                         Image {
-                            id: headerLogo
-                            // 30 px box, ~19 px visible mark, centered on the
+                            // 26 px box, ~16 px visible mark, centered on the
                             // rows' icon column so the labels line up below.
-                            x: Theme.space8 + 8 - width / 2
+                            x: Theme.space12 - Theme.space2 + 8 - width / 2
                             y: Math.round((parent.height - height) / 2)
-                            width: 30
-                            height: 30
+                            width: 26
+                            height: 26
                             source: Theme.dark ? "assets/lugh-logo-dark.svg" : "assets/lugh-logo.svg"
                             sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
                             smooth: true
                         }
                         Column {
-                            // Same x as the row labels (8 + 16 icon + 8).
-                            x: Theme.space8 + 16 + Theme.space8
+                            x: Theme.space12 - Theme.space2 + 16 + Theme.space12 - Theme.space2
                             width: parent.width - x - Theme.space8
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 1
                             Text {
                                 width: parent.width
-                                text: qsTr("About Lugh")
-                                font: Theme.typeBodyStrong
+                                text: qsTr("Lugh")
+                                font: Theme.typeLabel
                                 color: Theme.text
                                 elide: Text.ElideRight
                                 Accessible.ignored: true
@@ -181,71 +183,66 @@ Item {
                         }
                     }
 
-                    MenuSeparator { width: parent.width }
+                    Hairline {}
 
-                    LughMenuRow {
+                    Row_ {
                         id: settingsRow
-                        width: parent.width
                         text: qsTr("Settings…")
                         iconName: "settings"
                         disabledReason: qsTr("Settings arrives in Phase 2")
-                        current: panel.current === 0
-                        onHoveredIn: panel.current = 0
                     }
-                    LughMenuRow {
+                    Row_ {
                         id: storeRow
-                        width: parent.width
                         text: qsTr("Store…")
                         iconName: "shopping-bag"
                         disabledReason: qsTr("The Store arrives in Phase 2")
-                        current: panel.current === 1
-                        onHoveredIn: panel.current = 1
                     }
 
-                    MenuSeparator { width: parent.width }
+                    Hairline {}
 
-                    LughMenuRow {
+                    Row_ {
                         id: lockRow
-                        width: parent.width
                         text: qsTr("Lock")
                         iconName: "lock"
                         shortcutText: qsTr("Super+L")
-                        current: panel.current === 2
-                        onHoveredIn: panel.current = 2
                         onTriggered: { ShellState.closeAll(); Services.session.lock(); }
                     }
-                    LughMenuRow {
+                    Row_ {
+                        id: sleepRow
+                        visible: root.canSuspend
+                        text: qsTr("Sleep")
+                        iconName: "moon"
+                        onTriggered: { ShellState.closeAll(); Services.session.suspend(); }
+                    }
+                    Row_ {
                         id: logoutRow
-                        width: parent.width
                         text: qsTr("Log out…")
                         iconName: "log-out"
-                        current: panel.current === 3
-                        onHoveredIn: panel.current = 3
                         onTriggered: root._ask("logout")
                     }
-                    LughMenuRow {
+                    Row_ {
                         id: restartRow
-                        width: parent.width
                         text: qsTr("Restart…")
                         iconName: "rotate-ccw"
-                        current: panel.current === 4
-                        onHoveredIn: panel.current = 4
                         onTriggered: root._ask("restart")
                     }
-                    LughMenuRow {
+                    Row_ {
                         id: shutdownRow
-                        width: parent.width
                         text: qsTr("Shut down…")
                         iconName: "power"
-                        current: panel.current === 5
-                        onHoveredIn: panel.current = 5
                         onTriggered: root._ask("shutdown")
                     }
                 }
             }
+        }
+    }
 
-            // Confirmation for the session-ending actions. Calm on purpose:
-            // no red, the default button is the action the user just chose.
+    // Confirmation for the session-ending actions. Calm on purpose: no red,
+    // the default button is the action the user just chose.
+    Loader {
+        anchors.fill: parent
+        active: root.pendingConfirm !== ""
+        sourceComponent: Item {
             Dialog {
                 id: confirm
                 readonly property var _copy: ({
@@ -253,22 +250,20 @@ Item {
                     restart: [qsTr("Restart now?"), qsTr("Your apps will close and the computer will restart."), qsTr("Restart")],
                     shutdown: [qsTr("Shut down now?"), qsTr("Your apps will close and the computer will turn off."), qsTr("Shut down")]
                 })
-                readonly property var _c: _copy[root.pendingConfirm] || _copy.shutdown
+                // Captured once: the copy must not change while the dialog fades out.
+                property string kind: ""
+                readonly property var _c: _copy[kind] || _copy.shutdown
                 title: _c[0]
                 text: _c[1]
                 primaryText: _c[2]
                 onAccepted: {
                     const s = Services.session;
-                    if (root.pendingConfirm === "logout") s.logout();
-                    else if (root.pendingConfirm === "restart") s.restart();
-                    else if (root.pendingConfirm === "shutdown") s.shutdown();
+                    if (kind === "logout") s.logout();
+                    else if (kind === "restart") s.restart();
+                    else if (kind === "shutdown") s.shutdown();
                 }
                 onClosed: root.pendingConfirm = ""
-                Component.onCompleted: if (root.pendingConfirm !== "") open()
-                Connections {
-                    target: root
-                    function onPendingConfirmChanged() { if (root.pendingConfirm !== "") confirm.open(); }
-                }
+                Component.onCompleted: { kind = root.pendingConfirm; open(); }
             }
         }
     }
