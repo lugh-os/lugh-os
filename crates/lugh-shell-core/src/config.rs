@@ -23,7 +23,7 @@
 //! autohide = false
 //! magnify = false
 //! icon_size = 56                        # 40..=80 px
-//! pinned = ["firefox", "lugh-files", "org.codeberg.dnkl.foot", "lugh-store", "lugh-settings"]
+//! pinned = ["firefox", "pcmanfm-qt", "foot", "vlc"]
 //!
 //! [bar]
 //! show_date = true
@@ -293,15 +293,12 @@ impl Default for Dock {
             autohide: false,
             magnify: false,
             icon_size: 56,
-            pinned: [
-                "firefox",
-                "lugh-files",
-                "org.codeberg.dnkl.foot",
-                "lugh-store",
-                "lugh-settings",
-            ]
-            .map(String::from)
-            .to_vec(),
+            // The apps of the Minimal profile (lugh-desktop-minimal), by
+            // their Debian desktop-file ids. Lugh's own Files, Store and
+            // Settings take their places when they ship.
+            pinned: ["firefox", "pcmanfm-qt", "foot", "vlc"]
+                .map(String::from)
+                .to_vec(),
         }
     }
 }
@@ -1003,7 +1000,7 @@ mod tests {
         assert!(w.is_empty());
         assert_eq!(c, DesktopConfig::default());
         assert_eq!(c.dock.icon_size, 56);
-        assert_eq!(c.dock.pinned[2], "org.codeberg.dnkl.foot");
+        assert_eq!(c.dock.pinned[2], "foot");
         assert_eq!(c.notifications.popup_timeout_ms, 5000);
         assert_eq!(c.appearance.accent, Accent::Amber);
     }
