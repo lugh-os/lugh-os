@@ -1,19 +1,24 @@
 // Desktop wallpaper: fills its parent with the current wallpaper and
-// cross-fades between the light ("Dawn") and dark ("Dusk") art when the theme
-// changes.
+// cross-fades between the light and dark variant of the art when the theme
+// (or the chosen wallpaper) changes.
 //
 //   Wallpaper { anchors.fill: parent }                  // desktop
 //   Wallpaper { anchors.fill: parent; blurred: true }   // lock screen, glass backdrops
+//   Wallpaper { anchors.fill: parent; name: "tide" }    // a bundled wallpaper by name
 //
 // Source, in order: `source` if set; else Services.appearance.wallpaperDark /
-// wallpaperLight when non-empty; else the bundled art, looked up in
-// /usr/share/backgrounds/lugh/ (lugh-branding) and, if that fails to load, in
-// the repo's branding/wallpapers/ (preview and demos).
+// wallpaperLight when they hold a file path or URL; else the bundled art
+// `<name>-<light|dark>-<size>.jpg`, where the name is the one in
+// Services.appearance.wallpaperDark / wallpaperLight when that has the form
+// `lugh://wallpapers/<name>`, else the `name` property ("dawn", "tide",
+// "ember"; see branding/wallpapers/wallpapers.json). Bundled art is looked up
+// in /usr/share/backgrounds/lugh/ (lugh-branding) and, if that fails to load,
+// in the repo's branding/wallpapers/ (preview and demos).
 //
 // Memory: the full-size image is decoded at the item's pixel size
 // (sourceSize = size × devicePixelRatio, cropped to cover), asynchronously and
-// uncached, from the 2560×1600 file unless the item is wider than 2560 device
-// pixels. Two layers exist only to cross-fade; once a fade ends the hidden
+// uncached, from the smallest file that covers it: 2560×1600 up to 2560 device
+// pixels wide, 3840×2160 up to 3840, 5120×2880 beyond. Two layers exist only to cross-fade; once a fade ends the hidden
 // layer's source is cleared, so one full-size texture stays resident.
 // `blurred` uses the small pre-blurred file (960×540, cached, scaled up
 // smoothly) instead of a runtime blur shader.
@@ -27,6 +32,8 @@ Item {
 
     property bool dark: Theme.dark
     property bool blurred: false
+    // Bundled wallpaper to show when Services does not choose one.
+    property string name: "dawn"
     // Optional override for both themes. Empty = follow Services/bundled art.
     property url source: ""
 
@@ -48,12 +55,26 @@ Item {
     readonly property string _custom: {
         if (_customFailed) return "";
         if (source.toString() !== "") return source.toString();
+        return _setting.startsWith(_scheme) ? "" : _setting;
+    }
+    readonly property string _scheme: "lugh://wallpapers/"
+    readonly property string _setting: {
         const a = Services.appearance;
         return (dark ? a.wallpaperDark : a.wallpaperLight) || "";
     }
+    // The bundled name in effect: lugh://wallpapers/<name> from Services, else `name`.
+    readonly property string bundledName: {
+        if (source.toString() === "" && _setting.startsWith(_scheme)) {
+            const n = _setting.slice(_scheme.length).replace(/[^a-z0-9_-]/gi, "");
+            if (n !== "") return n;
+        }
+        return name || "dawn";
+    }
+    property bool _nameFailed: false     // set when the named art does not exist
+    onBundledNameChanged: _nameFailed = false
     readonly property string _bundled: {
-        const kind = blurred ? "blur" : (_pxW > 2560 ? "3840x2160" : "2560x1600");
-        return (_useRepo ? repoDir : systemDir) + "dawn-" + (dark ? "dark" : "light") + "-" + kind + ".jpg";
+        const kind = blurred ? "blur" : (_pxW > 3840 ? "5120x2880" : _pxW > 2560 ? "3840x2160" : "2560x1600");
+        return (_useRepo ? repoDir : systemDir) + (_nameFailed ? "dawn" : bundledName) + "-" + (dark ? "dark" : "light") + "-" + kind + ".jpg";
     }
     // Nothing loads until the item has a size: a 0×0 sourceSize would decode
     // the file at full resolution.
@@ -109,6 +130,9 @@ Item {
         } else if (_custom !== "" && url === _custom) {
             console.warn("Wallpaper: cannot load", url, "- using the default");
             _customFailed = true;
+        } else if (!_nameFailed && bundledName !== "dawn") {
+            console.warn("Wallpaper: no bundled wallpaper named", bundledName, "- using dawn");
+            _nameFailed = true;
         } else {
             console.warn("Wallpaper: cannot load", url);
             if (layer === _incoming) { layer.source = ""; _incoming = null; }
