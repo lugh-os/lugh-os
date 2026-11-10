@@ -5,7 +5,8 @@
 //            onIconClicked: audio.muted = !audio.muted }
 //
 // 28 px rounded track; the accent fill grows from the left with a straight
-// leading edge (clipped, no offscreen pass) and a small grip. The optional
+// leading edge (clipped, no offscreen pass) and a small grip. `compact: true`
+// gives the 20 px track used in islands, the OSD and control-center rows. The optional
 // leading icon sits inside the track and switches to `onAccent` exactly where
 // the fill covers it. Arrow keys step by `stepSize`; Page Up/Down by 10 %.
 import QtQuick
@@ -17,11 +18,13 @@ T.Slider {
     property string iconName: ""
     property string iconTooltip: ""
     property bool showValue: false
+    property bool compact: false
 
     signal iconClicked()
 
-    readonly property int _trackH: 28
-    readonly property int _iconZone: iconName !== "" ? 32 : 0
+    readonly property int _trackH: compact ? 20 : 28
+    readonly property int _iconSize: compact ? 14 : 16
+    readonly property int _iconZone: iconName !== "" ? (compact ? 26 : 32) : 0
     readonly property int _valueW: showValue ? 40 : 0
     readonly property real _fillW: Math.round(visualPosition * track.width)
     readonly property bool _hot: enabled && (hovered || pressed)
@@ -58,6 +61,9 @@ T.Slider {
         antialiasing: true
         color: control._hot ? Qt.tint(Theme.surface3, Theme.hoverOverlay) : Theme.surface3
         Behavior on color { ColorAnimation { duration: Theme.durMicro } }
+        // hairline so the unfilled part reads on dark surfaces and on glass
+        border.width: 1
+        border.color: Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, Theme.dark ? 0.16 : 0.10)
 
         // muted icon (under the fill)
         Icon {
@@ -66,7 +72,7 @@ T.Slider {
             x: (control._iconZone - size) / 2 + 2
             anchors.verticalCenter: parent.verticalCenter
             name: control.iconName
-            size: 16
+            size: control._iconSize
             color: Theme.textMuted
         }
 
@@ -93,14 +99,14 @@ T.Slider {
                 x: iconBase.x
                 anchors.verticalCenter: parent.verticalCenter
                 name: control.iconName
-                size: 16
+                size: control._iconSize
                 color: Theme.onAccent
             }
 
             // grip at the leading edge
             Rectangle {
                 width: 3
-                height: 12
+                height: control.compact ? 8 : 12
                 radius: 1.5
                 x: parent.width - width - 6
                 anchors.verticalCenter: parent.verticalCenter
