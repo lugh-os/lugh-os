@@ -4,7 +4,8 @@
 //   MenuItem { text: qsTr("Show hidden files"); checkable: true; checked: true }
 //   MenuItem { text: qsTr("Delete"); iconName: "trash-2"; danger: true }
 //
-// 32 px tall. Highlight (hover or arrow keys) = surface2, pressed = surface3.
+// 32 px tall. Highlight (hover or arrow keys) = surface2, pressed = surface3
+// (one step stronger in dark, where surface2 on surface is too faint).
 // A checked item shows a check glyph in the leading column (not color alone).
 // shortcutText sits right-aligned and muted; submenus get a chevron.
 import QtQuick
@@ -93,8 +94,8 @@ T.MenuItem {
         implicitHeight: 32
         radius: Theme.radiusSm
         color: !control.enabled ? "transparent"
-            : control.down ? Theme.surface3
-            : control.highlighted ? Theme.surface2
+            : control.down ? (Theme.dark ? Qt.tint(Theme.surface3, Theme.pressedOverlay) : Theme.surface3)
+            : control.highlighted ? (Theme.dark ? Theme.surface3 : Theme.surface2)
             : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.durMicro } }
     }
