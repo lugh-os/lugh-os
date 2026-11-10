@@ -1,0 +1,35 @@
+Source: lugh-desktop-minimal
+Section: metapackages
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-desktop-minimal
+Architecture: all
+Depends: firefox,
+         fonts-inter,
+         fonts-jetbrains-mono,
+         fonts-noto-color-emoji,
+         fonts-noto-core,
+         foot,
+         lugh-branding (>= ${source:Version}),
+         lugh-greeter (>= ${source:Version}),
+         lugh-session (>= ${source:Version}),
+         lugh-shell (>= ${source:Version}),
+         network-manager,
+         pcmanfm-qt,
+         pipewire,
+         pipewire-audio,
+         pipewire-pulse,
+         vlc,
+         wireplumber,
+         ${misc:Depends}
+Recommends: bluez, power-profiles-daemon
+Description: Lugh desktop, Minimal profile
+ Metapackage for the smallest complete Lugh desktop: the Lugh session, shell
+ and sign-in screen, Firefox, a terminal (foot), Files (pcmanfm-qt), VLC,
+ fonts, PipeWire audio and NetworkManager. No office suite, no store.
+ .
+ Firefox comes from the Mozilla apt repository (packages.mozilla.org).
