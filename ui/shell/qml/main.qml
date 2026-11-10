@@ -38,8 +38,8 @@
 //     rest of the shell still runs.
 //
 // Dev flags (after `--`): --dark, --accent <name>, --reduce-motion,
-// --wallpaper-dir <file URL/>, --lazy-overlays, --measure (print the first
-// frame's time), --idle-report <s> (count frames per window for s seconds
+// --wallpaper-dir <file URL/>, --lazy-overlays, --no-media (mock: nothing
+// playing), --idle-report <s> (count frames per window for s seconds
 // once settled, print them; scripts/shell-run.sh --nested reads it).
 pragma ComponentBehavior: Bound
 import QtQuick
@@ -66,6 +66,8 @@ QtObject {
         if (_args.indexOf("--dark") >= 0) Theme.dark = true;
         Theme.accentName = _arg("--accent", Theme.accentName);
         if (_args.indexOf("--reduce-motion") >= 0) Theme.reduceMotion = true;
+        // Mock only: the media equalizer in the bar animates while playing.
+        if (_args.indexOf("--no-media") >= 0 && !Services.live) Services.media.playing = false;
         const wpDir = _arg("--wallpaper-dir", "");
         if (wpDir !== "") Services.appearance.wallpaperDir = wpDir;
         startLocked = Services.session.locked;
