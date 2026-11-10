@@ -459,6 +459,12 @@ impl ScopeManager for SystemdScopes {
     }
 }
 
+impl<T: ScopeManager + ?Sized> ScopeManager for std::sync::Arc<T> {
+    fn start_scope(&self, unit: &str, pid: u32, description: &str) -> Result<(), ScopeError> {
+        (**self).start_scope(unit, pid, description)
+    }
+}
+
 /// [`ScopeManager`] that does nothing (sessions without systemd, tests).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoScopes;
