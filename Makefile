@@ -26,6 +26,7 @@ CONTAINER_LIB := source scripts/lib/container.sh
 .PHONY: help iso debs repo brand-assets check hello build-env \
         run-uefi run-uefi-sb run-bios \
         test-boot test-boot-uefi test-boot-uefi-sb test-boot-bios \
+        preview shots qml-check \
         clean
 
 help: ## List the make targets
@@ -74,6 +75,19 @@ hello: ## Build the cxx-qt hello app (ui/hello) in a trixie container
 	    shopt -s globstar nullglob && qml=(ui/**/*.qml) && \
 	    if (($${#qml[@]})); then /usr/lib/qt6/bin/qmllint -I out/hello-target/cxxqt/qml_modules "$${qml[@]}"; fi'
 	@echo "hello: built in out/hello-target/debug/, qmllint clean"
+
+# --- shell (QML) -------------------------------------------------------------
+# Host-side: needs Qt 6 (qml6) with the Qt Quick, Shapes and layer-shell-qt QML
+# modules. See ui/shell/README.md. Extra preview args: make preview ARGS="--dark".
+
+preview: ## Desktop preview in a window (ARGS="--dark --state launcher …")
+	scripts/shell-preview.sh $(ARGS)
+
+shots: ## Render the preview, light+dark x every state -> out/shots/*.png
+	scripts/shell-shots.sh out/shots
+
+qml-check: ## Load every QML demo/surface/preview state headless; fail on any warning
+	scripts/qml-check.sh
 
 # --- QEMU --------------------------------------------------------------------
 
