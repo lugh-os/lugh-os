@@ -24,6 +24,8 @@ SECURITY_MIRROR="${LUGH_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-sec
 # live-config.*: live user "lugh" (passwordless sudo comes from live-config's
 #   sudo component, so it exists on the live image only), hostname "lugh".
 # console=tty0 console=ttyS0,115200: serial log for the QEMU boot test.
+# plymouth.ignore-serial-consoles: without it Plymouth sees console=ttyS0 and
+#   falls back to text mode, so the Lugh splash never shows.
 lb config noauto \
 	--mode debian \
 	--architecture amd64 \
@@ -55,6 +57,6 @@ lb config noauto \
 	--iso-publisher "Lugh" \
 	--iso-volume "LUGH" \
 	--image-name lugh \
-	--bootappend-live "boot=live components quiet splash live-config.username=lugh live-config.user-fullname=Lugh live-config.hostname=lugh console=tty0 console=ttyS0,115200" \
+	--bootappend-live "boot=live components quiet splash plymouth.ignore-serial-consoles live-config.username=lugh live-config.user-fullname=Lugh live-config.hostname=lugh console=tty0 console=ttyS0,115200" \
 	--bootappend-live-failsafe "boot=live components memtest noapic noapm nodma nomce nosmp nosplash vga=788 live-config.username=lugh live-config.user-fullname=Lugh live-config.hostname=lugh console=tty0 console=ttyS0,115200" \
 	"${@}"
