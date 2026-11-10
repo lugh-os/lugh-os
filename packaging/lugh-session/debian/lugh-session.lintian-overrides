@@ -1,0 +1,2 @@
+# Helper scripts called by the Hyprland config through their full path.
+executable-not-elf-or-script [usr/share/lugh/hypr/scripts/*]
