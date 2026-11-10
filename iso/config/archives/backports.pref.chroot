@@ -1,0 +1,6 @@
+# Lugh: only the Hyprland stack (and the libraries it needs newer than
+# trixie has) comes from trixie-backports; everything else stays on trixie
+# (backports are NotAutomatic, priority 100). See docs/dev/hyprland.md §1.
+Package: hyprland hyprland-* hyprsunset xdg-desktop-portal-hyprland libhypr* libaquamarine* libxkbcommon0 libxkbcommon-x11-0 libxkbregistry0 xkb-data
+Pin: release n=trixie-backports
+Pin-Priority: 990
