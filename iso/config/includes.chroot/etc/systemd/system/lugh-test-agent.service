@@ -1,0 +1,9 @@
+# Started by udev (90-lugh-test.rules) only inside a test VM.
+[Unit]
+Description=Lugh test agent (root commands over virtio-serial, test VMs only)
+ConditionPathExists=/dev/virtio-ports/space.lugh.test
+
+[Service]
+ExecStart=/usr/local/lib/lugh/test-agent /dev/virtio-ports/space.lugh.test
+Restart=always
+RestartSec=1
