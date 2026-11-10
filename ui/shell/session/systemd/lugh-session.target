@@ -1,0 +1,17 @@
+# Lugh desktop session (Phases 1-4: on Hyprland).
+# Started by `lugh-session --ready` once the compositor is up and the session
+# environment is imported; stopped by lugh-session when the compositor exits.
+[Unit]
+Description=Lugh desktop session
+Documentation=file:///usr/share/doc/lugh-session/hyprland.md
+# graphical-session.target can't be started by hand (RefuseManualStart): it
+# follows this target. Units that are PartOf=graphical-session.target
+# (xdg-desktop-portal-hyprland, xdg-desktop-portal-gtk, ...) stop with us.
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+# The shell (bar, dock, launcher, notifications, polkit agent, lock screen).
+Wants=lugh-shell.service
+# XDG autostart entries (~/.config/autostart, /etc/xdg/autostart), filtered by
+# OnlyShowIn/NotShowIn against XDG_CURRENT_DESKTOP=Lugh:Hyprland.
+Wants=xdg-desktop-autostart.target
