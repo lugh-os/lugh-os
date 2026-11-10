@@ -1,0 +1,83 @@
+#!/bin/sh
+# greeter-session: what greetd runs as its default session (see
+# /etc/greetd/config.toml). greetd starts it with an almost empty
+# environment, as the greeter user (_greetd).
+#
+#   - sets the environment of the greeter: keyboard layout from
+#     /etc/default/keyboard, cursor theme, Qt on Wayland;
+#   - sources /etc/lugh/greeter-session.env if present (plain VAR=value
+#     lines; e.g. WLR_RENDERER_ALLOW_SOFTWARE=1 on the live ISO);
+#   - runs `cage -s -- lugh-greeter`;
+#   - counts consecutive failures in /run/lugh-greeter/failures (reset by a
+#     successful login or a reboot). From the 3rd failure on, greetd gets the
+#     text greeter tuigreet instead, so a login is always possible.
+set -u
+
+MAX_FAILURES=3
+state_dir=/run/lugh-greeter
+[ -d "$state_dir" ] && [ -w "$state_dir" ] || state_dir=${XDG_RUNTIME_DIR:-/tmp}
+counter=$state_dir/failures
+
+log() {
+    printf 'lugh-greeter-session: %s\n' "$*" >&2
+}
+
+export PATH=/usr/local/bin:/usr/bin:/bin
+export XDG_SESSION_TYPE=wayland
+export QT_QPA_PLATFORM=wayland
+export XCURSOR_THEME=Adwaita
+export XCURSOR_SIZE=24
+
+# Keyboard layout: the system-wide console/X11 setting.
+if [ -r /etc/default/keyboard ]; then
+    XKBMODEL='' XKBLAYOUT='' XKBVARIANT='' XKBOPTIONS=''
+    # shellcheck disable=SC1091
+    . /etc/default/keyboard
+    [ -z "${XKBLAYOUT:-}" ] || export XKB_DEFAULT_LAYOUT="$XKBLAYOUT"
+    [ -z "${XKBVARIANT:-}" ] || export XKB_DEFAULT_VARIANT="$XKBVARIANT"
+    [ -z "${XKBMODEL:-}" ] || export XKB_DEFAULT_MODEL="$XKBMODEL"
+    [ -z "${XKBOPTIONS:-}" ] || export XKB_DEFAULT_OPTIONS="$XKBOPTIONS"
+fi
+
+# Local overrides (the live ISO, an administrator).
+if [ -r /etc/lugh/greeter-session.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . /etc/lugh/greeter-session.env
+    set +a
+fi
+
+failures=0
+if [ -r "$counter" ]; then
+    read -r failures < "$counter" || failures=0
+    case "$failures" in
+        ''|*[!0-9]*) failures=0 ;;
+    esac
+fi
+
+if [ "$failures" -ge "$MAX_FAILURES" ] && command -v tuigreet >/dev/null 2>&1; then
+    log "lugh-greeter failed $failures times, starting tuigreet"
+    exec tuigreet --time --remember --remember-session --asterisks \
+        --greeting "Lugh OS" \
+        --sessions /usr/share/wayland-sessions --cmd lugh-session
+fi
+
+# greetd does not keep the greeter's output; send it to the journal
+# (journalctl -t lugh-greeter). systemd-cat execs the command, so the exit
+# status is cage's.
+if command -v systemd-cat >/dev/null 2>&1; then
+    systemd-cat --identifier=lugh-greeter cage -s -- lugh-greeter
+else
+    cage -s -- lugh-greeter
+fi
+status=$?
+
+if [ "$status" -eq 0 ]; then
+    rm -f "$counter"
+else
+    failures=$((failures + 1))
+    log "lugh-greeter exited with status $status (failure $failures of $MAX_FAILURES)"
+    printf '%s\n' "$failures" > "$counter" 2>/dev/null ||
+        log "cannot write $counter"
+fi
+exit "$status"
