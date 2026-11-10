@@ -1,0 +1,31 @@
+[{
+    "id": 0,
+    "name": "eDP-1",
+    "description": "Chimei Innolux Corporation 0x14D4",
+    "make": "Chimei Innolux Corporation",
+    "model": "0x14D4",
+    "serial": "",
+    "width": 1920,
+    "height": 1080,
+    "refreshRate": 60.00800,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 1,
+        "name": "1"
+    },
+    "specialWorkspace": {
+        "id": 0,
+        "name": ""
+    },
+    "reserved": [0, 30, 0, 0],
+    "scale": 1.00,
+    "transform": 0,
+    "focused": true,
+    "dpmsStatus": true,
+    "vrr": false,
+    "activelyTearing": false,
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "availableModes": ["1920x1080@60.01Hz"]
+}]
