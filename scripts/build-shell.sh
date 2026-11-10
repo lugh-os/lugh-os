@@ -66,6 +66,7 @@ build='rustup toolchain install >/dev/null
 (( test )) && build+='
   cargo test --release --manifest-path ui/shell/Cargo.toml "$@"'
 (( verify )) && build+='
+  mkdir -p /usr/share/backgrounds && ln -sfn /src/branding/wallpapers /usr/share/backgrounds/lugh
   dbus-run-session -- out/bin/lugh-shell --check --qml-dir ui/shell/qml --import-path ui/components'
 in_container bash -euo pipefail -c "$build" bash "${features[@]}"
 
