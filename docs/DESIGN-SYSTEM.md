@@ -113,6 +113,8 @@ Tabular numerals (`tnum`) are used in Tasks, clocks and anywhere numbers update 
 
 ## 8. The three desktop modes (visual spec)
 
+> **Lugh mode is specified in [design/lugh-mode.md](design/lugh-mode.md)** (ADR-028): floating glass islands instead of a top bar, panels that morph out of the island you touched, compact icon-first controls. Where the "Lugh" column below disagrees (bar, dock size, launcher, OSD), the design doc wins. The table's "Lugh" bar/dock/launcher rows now describe the planned **Mac-like** mode; **Classic** is the Windows-like mode.
+
 | | **Lugh** (default) | **Classic** | **Focus** |
 |---|---|---|---|
 | Bar | top, 30 px, glass; app menu left, status right | none (merged into the taskbar) | top, 24 px, solid or hidden; workspaces, clock, tray |
