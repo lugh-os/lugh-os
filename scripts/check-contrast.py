@@ -21,11 +21,26 @@ Pairs checked (DESIGN-SYSTEM §2, §7, §10):
                   text on the ErrorBanner tint                           4.5:1
   tooltip         bg on text (inverted)                                  4.5:1
   glass           text / textMuted on Theme.glass composited over the
-                  lightest and darkest region of branding/wallpapers/
-                  *-blur.jpg (needs PIL; else assumes bg behind)         4.5:1
-  non-text        focus ring (accent) vs bg / surface / surface2         3:1
+                  lightest and darkest region of every bundled
+                  branding/wallpapers/*-<mode>-blur.jpg (needs PIL; else
+                  assumes bg behind). This is island text at rest.       4.5:1
+  island          text / textMuted (typeLabel) on a hovered and on an
+                  active/pressed island, over every bundled wallpaper    4.5:1
+  icontoggle      off: Theme.text icon on its translucent fill (rest,
+                  hover, pressed) over glass over the lightest / darkest
+                  wallpaper region, and over surface; busy arc           3:1
+                  on: onAccent icon on accent, every preset; tone fills  3:1
+  chip            selected: accentText (label + check) on the accent
+                  tint; unselected: text on the neutral fill; both over
+                  surface, bg and glass over the wallpaper extremes      4.5:1
+  non-text        Toggle off track (its textMuted hairline) vs bg /
+                  surface / surface2                                     3:1
+  focus           focus ring vs bg / surface / surface2 and vs glass
+                  over the wallpaper extremes, every preset              3:1
 Advisory (reported, never fail the run): input borders, the off toggle
-track, glass over the "other" wallpaper, accentText on glass and surface2.
+fill without its hairline, glass over the other theme's wallpapers,
+accentText on plain glass and surface2, the island focus ring directly over
+the wallpaper (it is drawn outside the capsule).
 
 Exit status: 0 all required pairs pass, 1 a required pair fails or a token's
 runtime value differs from Theme.qml, 2 Theme.qml could not be parsed.
@@ -47,6 +62,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 THEME = ROOT / "ui/components/Lugh/UI/Theme.qml"
 WALLPAPERS = ROOT / "branding/wallpapers"
+UI = ROOT / "ui/components/Lugh/UI"
 
 AA_TEXT = 4.5
 AA_NONTEXT = 3.0
@@ -239,25 +255,48 @@ Item {
 
 # ---- wallpaper sampling -------------------------------------------------------
 
-def wallpaper_extremes(mode: str) -> tuple[RGBA, RGBA, str] | None:
-    """(lightest, darkest) region averages of the blurred wallpaper for a mode."""
-    path = WALLPAPERS / f"dawn-{mode}-blur.jpg"
-    if not path.exists():
-        cands = sorted(WALLPAPERS.glob(f"*{mode}*-blur.jpg")) if WALLPAPERS.exists() else []
-        if not cands:
-            return None
-        path = cands[0]
+def wallpaper_regions(mode: str) -> list[tuple[str, RGBA, RGBA]]:
+    """[(name, lightest, darkest)] region averages of every bundled blurred
+    wallpaper of a mode (branding/wallpapers/<name>-<mode>-blur.jpg)."""
     try:
         from PIL import Image  # type: ignore
     except ImportError:
-        return None
-    with Image.open(path) as im:
-        # 48x30 grid ≈ 53 px regions on a 2560-wide screen: about bar height.
-        small = im.convert("RGB").resize((48, 30), Image.BOX)
-        px = [tuple(v / 255 for v in small.getpixel((x, y))) + (1.0,)
-              for y in range(small.height) for x in range(small.width)]
-    px.sort(key=luminance)
-    return px[-1], px[0], str(path.relative_to(ROOT))
+        return []
+    out = []
+    for path in sorted(WALLPAPERS.glob(f"*-{mode}-blur.jpg")) if WALLPAPERS.exists() else []:
+        try:
+            with Image.open(path) as im:
+                # 48x30 grid ≈ 53 px regions on a 2560-wide screen: about bar height.
+                small = im.convert("RGB").resize((48, 30), Image.BOX)
+                px = [tuple(v / 255 for v in small.getpixel((x, y))) + (1.0,)
+                      for y in range(small.height) for x in range(small.width)]
+        except OSError:
+            continue
+        px.sort(key=luminance)
+        out.append((path.name[:-len("-blur.jpg")], px[-1], px[0]))
+    return out
+
+
+def extremes(regs: list[tuple[str, RGBA, RGBA]]) -> list[tuple[str, RGBA]]:
+    """The lightest and the darkest region across a set of wallpapers."""
+    if not regs:
+        return []
+    hi = max(regs, key=lambda r: luminance(r[1]))
+    lo = min(regs, key=lambda r: luminance(r[2]))
+    return [(f"{hi[0]} lightest", hi[1]), (f"{lo[0]} darkest", lo[2])]
+
+
+def component_alpha(file: str, default: float, nth: int = 0) -> float:
+    """Alpha of the nth `Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, A)` in a component."""
+    try:
+        src = (UI / file).read_text(encoding="utf-8")
+    except OSError:
+        return default
+    found = re.findall(r"Qt\.rgba\(Theme\.text\.r,\s*Theme\.text\.g,\s*Theme\.text\.b,\s*(" + _num + r")\)", src)
+    try:
+        return _eval_num(found[nth])
+    except (IndexError, ValueError):
+        return default
 
 
 # ---- the checks ---------------------------------------------------------------
@@ -296,11 +335,18 @@ def build_checks(t: dict, rt: dict | None) -> tuple[list[Check], list[str]]:
         checks.append(Check(mode, accent, group, fgn, bgn, to_hex(fg_c), to_hex(bg),
                             round(ratio(fg_c, bg), 2), need, required))
 
+    toggle_fill_a = component_alpha("IconToggle.qml", 0.10)   # off fill: Theme.text at 10%
+    chip_fill_a = component_alpha("Chip.qml", 0.08)           # unselected fill: Theme.text at 8%
+
     for mode in ("light", "dark"):
-        walls = wallpaper_extremes(mode)
-        other = wallpaper_extremes("dark" if mode == "light" else "light")
-        if walls is None:
+        regs = wallpaper_regions(mode)
+        walls = extremes(regs)
+        other = extremes(wallpaper_regions("dark" if mode == "light" else "light"))
+        if not regs:
             notes.append(f"{mode}: no wallpaper blur sample (PIL or file missing); glass assumed over bg")
+        else:
+            notes.append(f"{mode}: glass sampled over {', '.join(r[0] for r in regs)}"
+                         f" (extremes: {walls[0][0]}, {walls[1][0]})")
         for accent in t["names"]:
             v = theme_for(t, mode, accent)
             if rt and f"{mode}/{accent}" in rt:
@@ -333,25 +379,50 @@ def build_checks(t: dict, rt: dict | None) -> tuple[list[Check], list[str]]:
                 # --- tooltip (inverted)
                 add(mode, A, "tooltip", "bg", v["bg"], "text", v["text"], AA_TEXT)
                 # --- glass
+                # (island text at rest is exactly this: typeLabel text / textMuted on glass)
                 glass = v["glass"]
-                regions = ([("wallpaper lightest", walls[0]), ("wallpaper darkest", walls[1])]
-                           if walls else [("bg", v["bg"])])
+                regions = ([(f"{n} {w}", c) for n, hi, lo in regs for w, c in (("lightest", hi), ("darkest", lo))]
+                           if regs else [("bg", v["bg"])])
                 for rn, rc in regions:
                     comp = over(glass, rc)
                     for fgn in ("text", "textMuted"):
                         add(mode, A, "glass", fgn, v[fgn], f"glass over {rn}", comp, AA_TEXT)
-                if other:
-                    for rn, rc in (("other-theme wallpaper lightest", other[0]),
-                                   ("other-theme wallpaper darkest", other[1])):
-                        comp = over(glass, rc)
-                        for fgn in ("text", "textMuted"):
-                            add(mode, A, "glass", fgn, v[fgn], f"glass over {rn}", comp, AA_TEXT, required=False)
+                        # --- island: hovered, and active (panel open) / pressed
+                        add(mode, A, "island", fgn, v[fgn], f"island hover over {rn}",
+                            tint(comp, v["hoverOverlay"]), AA_TEXT)
+                        add(mode, A, "island", fgn, v[fgn], f"island active over {rn}",
+                            tint(comp, v["pressedOverlay"]), AA_TEXT)
+                for rn, rc in other:
+                    comp = over(glass, rc)
+                    for fgn in ("text", "textMuted"):
+                        add(mode, A, "glass", fgn, v[fgn], f"glass over other-theme {rn}", comp, AA_TEXT, required=False)
+                # --- IconToggle off: Theme.text icon on Theme.text@10% (+ state overlays)
+                ext = [(f"glass over {rn}", over(glass, rc)) for rn, rc in walls] or [("glass over bg", over(glass, v["bg"]))]
+                for bn, bc in ext + [("surface", v["surface"])]:
+                    fill = over(with_alpha(v["text"], toggle_fill_a), bc)
+                    add(mode, A, "icontoggle", "text (off icon)", v["text"], f"off fill on {bn}", fill, AA_NONTEXT)
+                    add(mode, A, "icontoggle", "text (off icon)", v["text"], f"off fill+hover on {bn}",
+                        tint(fill, v["hoverOverlay"]), AA_NONTEXT)
+                    add(mode, A, "icontoggle", "text (off icon)", v["text"], f"off fill+pressed on {bn}",
+                        tint(fill, v["pressedOverlay"]), AA_NONTEXT)
+                # tone fills (danger / success / info use onDanger, neutral inverts)
+                for fill in ("danger", "success", "info"):
+                    add(mode, A, "icontoggle", "onDanger (on icon)", v["onDanger"], f"{fill} tone", v[fill], AA_NONTEXT)
+                add(mode, A, "icontoggle", "bg (on icon)", v["bg"], "neutral tone (text)", v["text"], AA_NONTEXT)
+                # --- Chip unselected: text label, textMuted icon on Theme.text@8%
+                for bn, bc in ext + [("surface", v["surface"]), ("bg", v["bg"])]:
+                    fill = over(with_alpha(v["text"], chip_fill_a), bc)
+                    add(mode, A, "chip", "text", v["text"], f"chip on {bn}", fill, AA_TEXT)
+                    add(mode, A, "chip", "textMuted (icon)", v["textMuted"], f"chip on {bn}", fill, AA_NONTEXT)
                 # --- advisory non-text boundaries (WCAG 1.4.11)
                 add(mode, A, "non-text", "border", v["border"], "surface", v["surface"], AA_NONTEXT, required=False)
                 add(mode, A, "non-text", "border (input)", v["border"], "surface2", v["surface2"], AA_NONTEXT, required=False)
                 off = with_alpha(v["text"], 0.24 if mode == "dark" else 0.20)  # Toggle.qml off track
-                for bgn in ("bg", "surface"):
-                    add(mode, A, "non-text", "toggle off track", over(off, v[bgn]), bgn, v[bgn], AA_NONTEXT, required=False)
+                for bgn in ("bg", "surface", "surface2"):
+                    # the 1 px textMuted hairline is what carries the off track (WCAG 1.4.11)
+                    add(mode, A, "non-text", "toggle off track (hairline)", v["textMuted"], bgn, v[bgn], AA_NONTEXT)
+                    add(mode, A, "non-text", "toggle off fill (no hairline)", over(off, v[bgn]), bgn, v[bgn],
+                        AA_NONTEXT, required=False)
 
             # --- accent (per preset)
             for bgn in ("bg", "surface"):
@@ -368,10 +439,23 @@ def build_checks(t: dict, rt: dict | None) -> tuple[list[Check], list[str]]:
                 tint(v["accent"], v["pressedOverlay"]), AA_TEXT)
             for bgn in ("bg", "surface", "surface2"):
                 add(mode, accent, "focus", "focusRing", v["focusRing"], bgn, v[bgn], AA_NONTEXT)
-            if walls:
-                comp = over(v["glass"], walls[0])
-                add(mode, accent, "glass", "accentText", v["accentText"], "glass over wallpaper lightest",
-                    comp, AA_TEXT, required=False)
+            # --- liquid set on glass (control center), per preset
+            add(mode, accent, "icontoggle", "onAccent (on icon)", v["onAccent"], "accent", v["accent"], AA_NONTEXT)
+            ext = ([(f"glass over {rn}", over(v["glass"], rc)) for rn, rc in walls]
+                   or [("glass over bg", over(v["glass"], v["bg"]))])
+            for bn, bc in ext:
+                add(mode, accent, "focus", "focusRing", v["focusRing"], bn, bc, AA_NONTEXT)
+                add(mode, accent, "glass", "accentText", v["accentText"], bn, bc, AA_TEXT, required=False)
+                # busy arc on an off toggle is drawn in focusRing
+                add(mode, accent, "icontoggle", "focusRing (busy arc)", v["focusRing"], f"off fill on {bn}",
+                    over(with_alpha(v["text"], toggle_fill_a), bc), AA_NONTEXT)
+            for bn, bc in ext + [("surface", v["surface"]), ("bg", v["bg"])]:
+                add(mode, accent, "chip", "accentText (selected)", v["accentText"], f"selectedBg on {bn}",
+                    over(v["selectedBg"], bc), AA_TEXT)
+            # the island's ring sits outside the capsule, straight on the wallpaper
+            for rn, rc in walls:
+                add(mode, accent, "focus", "focusRing (island)", v["focusRing"], f"wallpaper {rn}", rc,
+                    AA_NONTEXT, required=False)
     return checks, notes
 
 
