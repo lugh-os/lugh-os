@@ -249,15 +249,16 @@ fn snapshot_events_and_dispatch_end_to_end() {
     assert_eq!(
         fake.take_requests(),
         [
-            "dispatch focuswindow address:0x5a3e1d2c4b10",
-            "dispatch closewindow address:0x5a3e1d2c4b10",
-            "dispatch workspace 3",
-            "dispatch movetoworkspacesilent 3,address:0x5a3e1d2c4a00",
-            "dispatch togglefloating address:0x5a3e1d2c4a00",
+            r#"dispatch hl.dsp.focus({ window = "address:0x5a3e1d2c4b10" })"#,
+            r#"dispatch hl.dsp.window.alter_zorder({ mode = "top", window = "address:0x5a3e1d2c4b10" })"#,
+            r#"dispatch hl.dsp.window.close({ window = "address:0x5a3e1d2c4b10" })"#,
+            "dispatch hl.dsp.focus({ workspace = 3 })",
+            r#"dispatch hl.dsp.window.move({ workspace = 3, follow = false, window = "address:0x5a3e1d2c4a00" })"#,
+            r#"dispatch hl.dsp.window.float({ action = "toggle", window = "address:0x5a3e1d2c4a00" })"#,
             "j/clients",
-            "[[BATCH]]dispatch settiled address:0x5a3e1d2c4a00;dispatch settiled address:0x5a3e1d2c4b10",
+            r#"[[BATCH]]dispatch hl.dsp.window.float({ action = "unset", window = "address:0x5a3e1d2c4a00" });dispatch hl.dsp.window.float({ action = "unset", window = "address:0x5a3e1d2c4b10" })"#,
             "j/clients",
-            "[[BATCH]]dispatch settiled address:0x5a3e1d2c4c20",
+            r#"dispatch hl.dsp.window.float({ action = "unset", window = "address:0x5a3e1d2c4c20" })"#,
             "j/clients",
             "reload",
         ]
@@ -278,11 +279,13 @@ fn snapshot_events_and_dispatch_end_to_end() {
     ));
     assert_eq!(
         fake.take_requests(),
-        ["dispatch focuswindow address:0xdead"]
+        [r#"dispatch hl.dsp.focus({ window = "address:0xdead" })"#]
     );
 
     // The event socket drops: the reader reconnects and says so.
     fake.events.send(EventCmd::Drop).unwrap();
+    let ev = stream.next_timeout(WAIT).unwrap();
+    assert_eq!(ev, Some(WmEvent::Disconnected));
     let ev = stream.next_timeout(WAIT).unwrap();
     assert_eq!(ev, Some(WmEvent::Reconnected));
     assert!(state.apply(&WmEvent::Reconnected).is_empty());
@@ -309,6 +312,47 @@ fn snapshot_events_and_dispatch_end_to_end() {
     assert!(
         rx.recv_timeout(WAIT * 2).unwrap(),
         "reader thread kept the socket open"
+    );
+}
+
+/// A compositor on the legacy hyprlang config answers `Invalid dispatcher`
+/// to a Lua expression: the adapter switches to legacy strings and stays
+/// there.
+#[test]
+fn falls_back_to_legacy_dispatch_syntax() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = UnixListener::bind(dir.path().join(REQUEST_SOCKET)).unwrap();
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let log = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { return };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let reply = if request.contains("hl.dsp.") {
+                "Invalid dispatcher"
+            } else {
+                "ok"
+            };
+            log.lock().unwrap().push(request);
+            let _ = s.write_all(reply.as_bytes());
+        }
+    });
+    let wm = HyprlandAdapter::with_socket_dir(dir.path());
+    wm.switch_workspace(WorkspaceId(2)).unwrap();
+    wm.close(&id("0xabc")).unwrap();
+    wm.clone()
+        .move_to_workspace(&id("0xabc"), WorkspaceId(4))
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            "dispatch hl.dsp.focus({ workspace = 2 })",
+            "dispatch workspace 2",
+            "dispatch closewindow address:0xabc",
+            "dispatch movetoworkspacesilent 4,address:0xabc",
+        ]
     );
 }
 
