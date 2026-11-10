@@ -388,10 +388,14 @@ def build_checks(t: dict, rt: dict | None) -> tuple[list[Check], list[str]]:
                     for fgn in ("text", "textMuted"):
                         add(mode, A, "glass", fgn, v[fgn], f"glass over {rn}", comp, AA_TEXT)
                         # --- island: hovered, and active (panel open) / pressed
+                        # Island.qml: dark mode darkens (black 12% / 22%) instead of
+                        # the light hover/pressed overlays, so glass never gets lighter.
+                        hov = (0.0, 0.0, 0.0, 0.12) if mode == "dark" else v["hoverOverlay"]
+                        act = (0.0, 0.0, 0.0, 0.22) if mode == "dark" else v["pressedOverlay"]
                         add(mode, A, "island", fgn, v[fgn], f"island hover over {rn}",
-                            tint(comp, v["hoverOverlay"]), AA_TEXT)
+                            tint(comp, hov), AA_TEXT)
                         add(mode, A, "island", fgn, v[fgn], f"island active over {rn}",
-                            tint(comp, v["pressedOverlay"]), AA_TEXT)
+                            tint(comp, act), AA_TEXT)
                 for rn, rc in other:
                     comp = over(glass, rc)
                     for fgn in ("text", "textMuted"):
@@ -450,8 +454,11 @@ def build_checks(t: dict, rt: dict | None) -> tuple[list[Check], list[str]]:
                 add(mode, accent, "icontoggle", "focusRing (busy arc)", v["focusRing"], f"off fill on {bn}",
                     over(with_alpha(v["text"], toggle_fill_a), bc), AA_NONTEXT)
             for bn, bc in ext + [("surface", v["surface"]), ("bg", v["bg"])]:
-                add(mode, accent, "chip", "accentText (selected)", v["accentText"], f"selectedBg on {bn}",
+                # Chip.qml: the selected label is Theme.text (accentText only on the check tick)
+                add(mode, accent, "chip", "text (selected)", v["text"], f"selectedBg on {bn}",
                     over(v["selectedBg"], bc), AA_TEXT)
+                add(mode, accent, "chip", "accentText (selected check)", v["accentText"], f"selectedBg on {bn}",
+                    over(v["selectedBg"], bc), AA_NONTEXT)
             # the island's ring sits outside the capsule, straight on the wallpaper
             for rn, rc in walls:
                 add(mode, accent, "focus", "focusRing (island)", v["focusRing"], f"wallpaper {rn}", rc,
