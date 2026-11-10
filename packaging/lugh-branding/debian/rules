@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 # The source tree has debian/ and a copy of the repo's branding/ next to it
-# (scripts/build-debs.sh). Nothing is compiled: the assets in branding/ are
+# (debian/lugh-sources, copied by scripts/build-debs.sh). Nothing is compiled: the assets in branding/ are
 # committed, pre-generated files.
 
 %:
