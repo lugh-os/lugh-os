@@ -1,21 +1,28 @@
-// lugh-greeter UI (shell spec §Greeter, phase-1 §5). Same visual language as
-// the lock screen: blurred wallpaper, light clock, avatar + password field,
-// a glass status pill at the bottom.
+// lugh-greeter UI in the liquid language (docs/design/lugh-mode.md §3 "Lock /
+// greeter"). One product with the lock screen: the blurred wallpaper, the
+// clock as the hero, the password in a floating glass capsule, small glass
+// capsules in the bottom corners.
 //
 //   Greeter { anchors.fill: parent; backend: greetdBackend }
 //
 // Works on its own too (its own MockGreetd), so it can be loaded directly:
 //   QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh ui/greeter/qml/Greeter.qml out.png 1440 900
 //
-// Users: a carousel of avatars, the selected one centered, larger and named
-// (Left/Right, Home/End, click). More than `maxListedUsers` accounts, none, or
-// backend.hideUsers → a username field instead. The session picker shows only
-// when more than one session is installed.
+// Users: avatars in a row, the selected one larger, centered and named; a
+// switch glides (Left/Right, Home/End, click). More than `maxListedUsers`
+// accounts, none, or backend.hideUsers → a username capsule instead. The
+// session picker shows only when more than one session is installed.
 //
-// Auth (greetd): submit → createSession(user) → promptRequested → respond(pw)
-// → authSucceeded → content fades out → startSession(exec). authFailed →
-// the field shakes (none under reduce motion), clears, refocuses, and the
-// message shows inline with an icon.
+// Auth (greetd): submit → createSession(user) → promptRequested → respond(pw).
+//   - Waiting (PAM may take 2 s): spinner in the submit button, field read-only.
+//   - A further prompt (one-time code…): its text becomes the placeholder and
+//     the field takes the answer (masked only if the prompt is secret).
+//   - infoMessage: an info capsule under the field. authFailed: the capsule
+//     shakes (not under reduce motion), clears, refocuses; the message shows
+//     verbatim in a capsule under the field, which stays usable.
+//   - authSucceeded: the capsule contracts into a dot, the scene fades,
+//     startSession(exec) is called and a calm "Starting…" line stays until
+//     greetd ends the process. errorOccurred brings the form back.
 //
 // Depends only on Lugh.UI (no Lugh.Shell, whose Services belong to the user
 // session). Assets come from the repo when run from the source tree, else from
@@ -40,10 +47,20 @@ FocusScope {
 
     property string errorText: ""
     property string infoText: ""
-    readonly property bool busy: backend.authenticating && !_succeeded
+    // Waiting for greetd / PAM (not while a further prompt waits for the user).
+    readonly property bool busy: backend.authenticating && !_awaitingAnswer && !_succeeded
+    // Signed in; the session is being started.
+    readonly property bool starting: _starting
+    // True while the capsule or the user row moves (tests).
+    readonly property bool animating: capsule.animating || picker.gliding
+
     property bool _succeeded: false
-    property string _pending: ""          // password waiting for the prompt
+    property bool _starting: false
+    property string _pending: ""          // password waiting for the first prompt
     property bool _awaitingAnswer: false  // a prompt arrived with nothing pending
+    property string _promptText: ""
+    property bool _promptSecret: true
+    property bool _ready: false
 
     // ---- assets (repo when run from the source tree) ------------------------
     readonly property bool _devTree: Qt.resolvedUrl(".").toString().indexOf("/ui/greeter/qml/") >= 0
@@ -60,28 +77,34 @@ FocusScope {
 
     // ---- behaviour ---------------------------------------------------------------
     function selectUser(i) {
-        if (!listMode || i < 0 || i >= users.length || i === currentIndex || busy) return;
+        if (!listMode || i < 0 || i >= users.length || i === currentIndex || busy || _succeeded) return;
         if (backend.sessionUser !== "") backend.cancelSession();
         currentIndex = i;
+        _pending = "";
+        _awaitingAnswer = false;
         errorText = "";
         infoText = "";
-        passwordField.clear();
+        capsule.clear();
     }
     function submit() {
         if (busy || _succeeded) return;
-        if (!listMode && usernameField.text.trim() === "") { usernameField.forceActiveFocus(Qt.OtherFocusReason); return; }
-        if (passwordField.text === "") { focusPassword(); return; }
-        errorText = "";
-        infoText = "";
+        if (!listMode && userCapsule.text.trim() === "") { userCapsule.focusField(); return; }
         if (_awaitingAnswer && backend.sessionUser !== "") {
+            errorText = "";
+            infoText = "";
             _awaitingAnswer = false;
-            backend.respond(passwordField.text);
+            backend.respond(capsule.text);
             return;
         }
-        _pending = passwordField.text;
-        backend.createSession(listMode ? currentUser.userName : usernameField.text.trim());
+        if (capsule.text === "") { focusPassword(); return; }
+        errorText = "";
+        infoText = "";
+        _pending = capsule.text;
+        backend.createSession(listMode ? currentUser.userName : userCapsule.text.trim());
     }
-    function focusPassword() { passwordField.forceActiveFocus(Qt.OtherFocusReason); }
+    function focusPassword() { capsule.focusField(); }
+    // Text typed while the focus was elsewhere.
+    function typeText(t) { capsule.typeText(t); }
 
     Connections {
         target: root.backend
@@ -92,9 +115,10 @@ FocusScope {
                 root.backend.respond(p);
             } else {
                 // A further prompt (e.g. a one-time code): ask for it in the field.
+                root._promptText = String(text).replace(/[\s:]+$/, "");
+                root._promptSecret = secret;
                 root._awaitingAnswer = true;
-                root.infoText = text;
-                passwordField.clear();
+                capsule.clear();
                 root.focusPassword();
             }
         }
@@ -102,16 +126,41 @@ FocusScope {
         function onAuthFailed(message) {
             root._pending = "";
             root._awaitingAnswer = false;
+            root.infoText = "";
             root.errorText = message;
-            passwordField.clear();
+            capsule.clear();
             root.focusPassword();
-            if (!Theme.reduceMotion) shake.restart();
+            capsule.shake();
         }
         function onAuthSucceeded() {
+            root._pending = "";
+            root._awaitingAnswer = false;
+            root.errorText = "";
             root._succeeded = true;
-            leave.restart();
+            startTimer.restart();
         }
-        function onErrorOccurred(message) { root.errorText = message; }
+        function onErrorOccurred(message) {
+            // Also the way back when the session could not be started.
+            startTimer.stop();
+            if (root.backend.authenticating || root._succeeded) root.backend.cancelSession();
+            root._pending = "";
+            root._awaitingAnswer = false;
+            root._succeeded = false;
+            root._starting = false;
+            root.errorText = message;
+            capsule.clear();
+            root.focusPassword();
+        }
+    }
+
+    // The capsule contracts first, then the scene fades and the session starts.
+    Timer {
+        id: startTimer
+        interval: Theme.reduceMotion ? 1 : 280
+        onTriggered: {
+            root._starting = true;
+            root.backend.startSession(root.currentSession ? root.currentSession.exec : "lugh-session");
+        }
     }
 
     // Preselect the last user and session, and focus the first empty field.
@@ -123,19 +172,18 @@ FocusScope {
         sessionIndex = 0;
         for (let j = 0; j < sessions.length; ++j) if (sessions[j].id === backend.lastSession) sessionIndex = j;
         if (listMode) focusPassword();
-        else usernameField.forceActiveFocus(Qt.OtherFocusReason);
+        else userCapsule.focusField();
     }
     onUsersChanged: Qt.callLater(_reset)
     onSessionsChanged: Qt.callLater(_reset)
     onListModeChanged: Qt.callLater(_reset)
-    Component.onCompleted: _reset()
+    Component.onCompleted: { _reset(); _ready = true; }
 
     // Printable keys typed while focus is on a button go to the password field.
     Keys.onPressed: event => {
         if (event.text.length > 0 && event.text.charCodeAt(0) > 32
                 && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
-            root.focusPassword();
-            if (!passwordField.readOnly) passwordField.insert(passwordField.cursorPosition, event.text);
+            capsule.typeText(event.text);
             event.accepted = true;
         }
     }
@@ -159,99 +207,163 @@ FocusScope {
         Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durLarge) } }
         onStatusChanged: if (status === Image.Error && custom) _customFailed = true
     }
+    // Calms the wallpaper toward the theme background so text on it meets AA.
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, Theme.dark ? 0.45 : 0.32)
     }
 
-    // ---- content (fades out on success) ----------------------------------------------
-    Item {
-        id: content
-        anchors.fill: parent
+    // ---- "Starting…" (after sign-in, until greetd ends the greeter) -------------
+    Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.round(parent.height * 0.5 - height / 2)
+        width: Math.min(parent.width - Theme.space48, 480)
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+        text: root.currentSession ? qsTr("Starting %1…").arg(root.currentSession.name) : qsTr("Starting…")
+        font: Theme.typeTitle3
+        color: Theme.text
+        opacity: root._starting ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+        }
+        Accessible.role: Accessible.StaticText
+        Accessible.name: text
+    }
 
-        // Clock (smaller than the lock screen's).
+    // ---- scene (fades out once signed in) --------------------------------------------
+    Item {
+        id: scene
+        anchors.fill: parent
+        opacity: root._starting ? 0 : 1
+        visible: opacity > 0
+        enabled: !root._starting
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+        }
+
+        // ---- clock + date (the hero, as on the lock screen) ---------------------
         Column {
+            id: clockGroup
             anchors.horizontalCenter: parent.horizontalCenter
-            y: Math.round(parent.height * 0.08)
-            spacing: Theme.space2
+            y: Math.round(parent.height * 0.13)
+            spacing: Theme.space4
 
             Text {
                 id: clock
                 anchors.horizontalCenter: parent.horizontalCenter
                 property date now: new Date()
+                readonly property int px: Math.round(Math.max(80, Math.min(160, scene.height * 0.135)))
                 text: Qt.formatTime(now, "HH:mm")
                 font.family: Theme.fontUi
-                font.pixelSize: 64
-                font.weight: 300
+                font.pixelSize: px
+                font.weight: 250
                 font.features: { "tnum": 1 }
-                font.letterSpacing: -1
+                font.letterSpacing: -px * 0.03
                 color: Theme.text
                 Accessible.role: Accessible.StaticText
                 Accessible.name: qsTr("Time %1").arg(text)
+                // Wakes each second, repaints only when the minute changes.
                 Timer {
-                    interval: 1000 - (new Date()).getMilliseconds()
+                    interval: 1000
                     running: true
                     repeat: true
-                    onTriggered: { clock.now = new Date(); interval = 1000; }
+                    onTriggered: {
+                        const d = new Date();
+                        if (d.getMinutes() !== clock.now.getMinutes() || d.getHours() !== clock.now.getHours()) clock.now = d;
+                    }
                 }
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Qt.formatDate(clock.now, "dddd, d MMMM")
                 font.family: Theme.fontUi
-                font.pixelSize: 16
+                font.pixelSize: Math.round(clock.px * 0.16)
                 font.weight: 500
                 color: Theme.text
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
             }
         }
 
-        // ---- users ----------------------------------------------------------------
-        FocusScope {
-            id: picker
+        // ---- users, name, capsule(s) ----------------------------------------------
+        // The password capsule sits where the lock screen's does.
+        Column {
+            id: authColumn
             anchors.horizontalCenter: parent.horizontalCenter
-            y: Math.round(parent.height * 0.5 - 124)
+            y: Math.max(clockGroup.y + clockGroup.height + Theme.space16,
+                        Math.round(parent.height * 0.62) + 40 + capsule.height - height)
             width: parent.width
-            height: 112
-            visible: root.listMode
-            activeFocusOnTab: root.listMode && root.users.length > 1
-            Accessible.role: Accessible.List
-            Accessible.name: qsTr("Users")
+            spacing: Theme.space12
 
-            readonly property bool keyboardFocus: activeFocus
-            readonly property int bigSize: 96
-            readonly property int smallSize: 56
-            readonly property int gap: Theme.space24
+            FocusScope {
+                id: picker
+                width: parent.width
+                height: big
+                visible: root.listMode
+                activeFocusOnTab: root.listMode && root.users.length > 1
+                Accessible.role: Accessible.List
+                Accessible.name: qsTr("Users")
 
-            Keys.onLeftPressed: root.selectUser(root.currentIndex - 1)
-            Keys.onRightPressed: root.selectUser(root.currentIndex + 1)
-            Keys.onPressed: event => {
-                if (event.key === Qt.Key_Home) { root.selectUser(0); event.accepted = true; }
-                else if (event.key === Qt.Key_End) { root.selectUser(root.users.length - 1); event.accepted = true; }
-                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-                    root.focusPassword(); event.accepted = true;
-                }
-            }
+                readonly property int big: 88
+                readonly property int small: 48
+                readonly property int gap: Theme.space16
+                property int _moving: 0
+                readonly property bool gliding: _moving > 0
 
-            // The row slides so the selected user sits in the middle.
-            Row {
-                id: userRow
-                spacing: picker.gap
-                height: parent.height
-                x: Math.round(picker.width / 2 - root.currentIndex * (picker.smallSize + picker.gap) - picker.bigSize / 2)
-                Behavior on x {
-                    enabled: !Theme.reduceMotion
-                    NumberAnimation { duration: Theme.durMedium; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+                Keys.onLeftPressed: root.selectUser(root.currentIndex - 1)
+                Keys.onRightPressed: root.selectUser(root.currentIndex + 1)
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Home) { root.selectUser(0); event.accepted = true; }
+                    else if (event.key === Qt.Key_End) { root.selectUser(root.users.length - 1); event.accepted = true; }
+                    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                        root.focusPassword(); event.accepted = true;
+                    }
                 }
 
+                // Zero-width anchor at the middle of the row: a resize moves
+                // the avatars with it instead of making them glide.
+                Item {
+                id: rowCenter
+                x: Math.round(picker.width / 2)
                 Repeater {
                     model: root.listMode ? root.users : []
                     delegate: Item {
                         id: userItem
                         required property var modelData
                         required property int index
-                        readonly property bool selected: index === root.currentIndex
-                        width: selected ? picker.bigSize : picker.smallSize
-                        height: userRow.height
+                        readonly property int rel: index - root.currentIndex
+                        readonly property bool selected: rel === 0
+                        // Center of this avatar, from the middle of the row.
+                        readonly property real offset: rel === 0 ? 0
+                            : Math.sign(rel) * ((picker.big + picker.small) / 2 + picker.gap
+                                                + (Math.abs(rel) - 1) * (picker.small + picker.gap))
+
+                        width: picker.big
+                        height: picker.big
+                        x: Math.round(offset - width / 2)
+                        scale: selected ? 1 : picker.small / picker.big
+                        opacity: selected || hover.hovered ? 1 : 0.7
+                        visible: rowCenter.x + x + width > 0 && rowCenter.x + x < picker.width
+
+                        Behavior on x {
+                            enabled: root._ready && !Theme.reduceMotion
+                            SpringAnimation {
+                                spring: Theme.liquidSpring; damping: Theme.liquidDamping
+                                mass: Theme.liquidMass; epsilon: Theme.springEpsilon
+                                onRunningChanged: picker._moving += running ? 1 : -1
+                            }
+                        }
+                        Behavior on scale {
+                            enabled: root._ready && !Theme.reduceMotion
+                            SpringAnimation {
+                                spring: Theme.liquidSpring; damping: Theme.liquidDamping
+                                mass: Theme.liquidMass; epsilon: 0.0005
+                            }
+                        }
+                        Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durMicro) } }
+
                         Accessible.role: Accessible.RadioButton
                         Accessible.name: modelData.realName
                         Accessible.checkable: true
@@ -259,25 +371,23 @@ FocusScope {
 
                         Avatar {
                             id: av
-                            anchors.centerIn: parent
-                            size: userItem.width
+                            anchors.fill: parent
+                            size: picker.big
                             source: userItem.modelData.avatar
                             name: userItem.modelData.realName
-                            opacity: userItem.selected || hover.hovered ? 1 : 0.72
-                            Behavior on opacity { NumberAnimation { duration: Theme.durMicro } }
                         }
                         // Keyboard focus ring on the selected user.
                         Rectangle {
-                            anchors.centerIn: av
-                            width: av.width + 2 * (Theme.focusRingOffset + Theme.focusRingWidth) + 4
+                            anchors.centerIn: parent
+                            width: parent.width + 2 * (Theme.focusRingOffset + Theme.focusRingWidth) + 4
                             height: width
                             radius: width / 2
                             color: "transparent"
                             border.width: Theme.focusRingWidth
                             border.color: Theme.focusRing
-                            visible: userItem.selected && picker.keyboardFocus
+                            visible: userItem.selected && picker.activeFocus
                         }
-                        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+                        HoverHandler { id: hover; cursorShape: userItem.selected ? Qt.ArrowCursor : Qt.PointingHandCursor }
                         TapHandler {
                             onTapped: { root.selectUser(userItem.index); root.focusPassword(); }
                         }
@@ -287,176 +397,90 @@ FocusScope {
                         }
                     }
                 }
-            }
-        }
-
-        // ---- form ---------------------------------------------------------------
-        Column {
-            id: form
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: root.listMode ? picker.y + picker.height + Theme.space12 : Math.round(parent.height * 0.5 - 124)
-            width: 360
-            spacing: Theme.space12
-
-            // Username mode: a generic avatar instead of the carousel.
-            Avatar {
-                anchors.horizontalCenter: parent.horizontalCenter
-                visible: !root.listMode
-                size: 96
-                name: ""
+                }
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: parent.width
+                width: Math.min(parent.width - Theme.space48, 480)
                 horizontalAlignment: Text.AlignHCenter
                 visible: root.listMode
                 text: root.currentUser ? root.currentUser.realName : ""
                 elide: Text.ElideRight
-                font: Theme.typeTitle2
+                font: Theme.typeTitle3
                 color: Theme.text
                 Accessible.role: Accessible.Heading
                 Accessible.name: text
             }
 
-            Item { width: 1; height: Theme.space4 }
-
-            Item {
-                id: fields
+            // Username mode: a capsule for the name above the password one.
+            AuthCapsule {
+                id: userCapsule
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: fieldColumn.width
-                height: fieldColumn.height
-                transform: Translate { id: shakeShift }
-
-                Column {
-                    id: fieldColumn
-                    spacing: Theme.space8
-
-                    Row {
-                        spacing: Theme.space8
-                        visible: !root.listMode
-                        Item { width: submitButton.width; height: 1 }
-                        TextField {
-                            id: usernameField
-                            width: 264
-                            placeholderText: qsTr("Username")
-                            iconName: "user"
-                            readOnly: root.busy
-                            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                            Accessible.name: qsTr("Username")
-                            onAccepted: root.focusPassword()
-                            onTextEdited: { root.errorText = ""; if (root.backend.sessionUser !== "") root.backend.cancelSession(); }
-                        }
-                    }
-
-                    Row {
-                        spacing: Theme.space8
-                        Item { width: submitButton.width; height: 1 }
-                        TextField {
-                            id: passwordField
-                            width: 264
-                            password: true
-                            placeholderText: root._awaitingAnswer && root.infoText !== "" ? root.infoText : qsTr("Password")
-                            readOnly: root.busy || root._succeeded
-                            readonly property string a11yLabel: root.listMode && root.currentUser
-                                ? qsTr("Password for %1").arg(root.currentUser.realName) : qsTr("Password")
-                            // Qt blanks Accessible.name while passwordEdit is set, so
-                            // the label also goes in the description.
-                            Accessible.name: a11yLabel
-                            Accessible.description: [a11yLabel, root.errorText,
-                                                     root.backend.capsLock ? qsTr("Caps Lock is on") : ""]
-                                                    .filter(s => s !== "").join(". ")
-                            onAccepted: root.submit()
-                            Keys.onPressed: event => {
-                                if (event.key === Qt.Key_Escape) {
-                                    if (passwordField.text !== "") passwordField.clear();
-                                    else if (root.backend.sessionUser !== "" && !root.busy) root.backend.cancelSession();
-                                    root.errorText = "";
-                                    event.accepted = true;
-                                } else if (root.listMode && passwordField.text === ""
-                                           && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
-                                    root.selectUser(root.currentIndex + (event.key === Qt.Key_Left ? -1 : 1));
-                                    event.accepted = true;
-                                }
-                            }
-
-                            // Spinner over the trailing area while authenticating.
-                            Rectangle {
-                                x: passwordField.width - width - Theme.space4
-                                y: (36 - height) / 2
-                                width: 28
-                                height: 28
-                                radius: Theme.radiusSm
-                                color: Theme.surface2
-                                visible: root.busy || root._succeeded
-                                Spinner { anchors.centerIn: parent; size: 16; running: parent.visible }
-                                MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
-                            }
-                        }
-                        IconButton {
-                            id: submitButton
-                            size: 36
-                            iconSize: 18
-                            variant: "accent"
-                            iconName: "arrow-right"
-                            tooltip: qsTr("Sign in")
-                            focusPolicy: Qt.TabFocus
-                            enabled: passwordField.length > 0 && !root.busy && !root._succeeded
-                            disabledReason: root.busy ? qsTr("Checking your password") : qsTr("Type your password first")
-                            onClicked: root.submit()
-                        }
-                    }
+                visible: !root.listMode
+                leadingIcon: "user"
+                secret: false
+                showSubmit: false
+                placeholder: qsTr("Username")
+                a11yLabel: qsTr("Username")
+                busy: root.busy
+                done: root._succeeded
+                field.inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+                onSubmitted: root.focusPassword()
+                onEdited: {
+                    root.errorText = "";
+                    root._awaitingAnswer = false;
+                    if (root.backend.sessionUser !== "") root.backend.cancelSession();
                 }
             }
 
-            // Messages: fixed-height slot so nothing below jumps.
-            Item {
-                width: parent.width
-                height: 64
-                Column {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: Theme.space8
-                    Message {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: root.errorText !== "" && !root.busy
-                        iconName: "circle-alert"
-                        iconColor: Theme.danger
-                        textColor: Theme.danger
-                        text: root.errorText
-                        Accessible.role: Accessible.AlertMessage
-                    }
-                    Message {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: root.infoText !== "" && root.errorText === "" && !root._awaitingAnswer
-                        iconName: "info"
-                        iconColor: Theme.info
-                        textColor: Theme.text
-                        text: root.infoText
-                    }
-                    Message {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: root.backend.capsLock
-                        iconName: "arrow-big-up"
-                        iconColor: Theme.warning
-                        textColor: Theme.text
-                        text: qsTr("Caps Lock is on")
+            AuthCapsule {
+                id: capsule
+                anchors.horizontalCenter: parent.horizontalCenter
+                focus: true
+                leadingIcon: root.listMode ? "" : "key-round"
+                avatarSource: root.currentUser ? root.currentUser.avatar : ""
+                avatarName: root.currentUser ? root.currentUser.realName : ""
+                secret: root._awaitingAnswer ? root._promptSecret : true
+                placeholder: root._awaitingAnswer && root._promptText !== "" ? root._promptText : qsTr("Password")
+                a11yLabel: root._awaitingAnswer && root._promptText !== "" ? root._promptText
+                         : root.currentUser ? qsTr("Password for %1").arg(root.currentUser.realName) : qsTr("Password")
+                submitTooltip: qsTr("Sign in")
+                // Some extra prompts take an empty answer ("press Enter").
+                allowEmpty: root._awaitingAnswer
+                arrowsWhenEmpty: root.listMode
+                busy: root.busy
+                done: root._succeeded
+                errorText: root.errorText
+                infoText: root.infoText
+                capsLock: root.backend.capsLock
+                maxMessageWidth: Math.min(scene.width - Theme.space48, 480)
+                onSubmitted: root.submit()
+                onHorizontalArrow: direction => root.selectUser(root.currentIndex + direction)
+                onEscapePressed: wasEmpty => {
+                    root.errorText = "";
+                    if (wasEmpty && root.backend.sessionUser !== "" && !root.busy) {
+                        root.backend.cancelSession();
+                        root._awaitingAnswer = false;
+                        root.infoText = "";
                     }
                 }
             }
         }
 
-        // ---- bottom bar ---------------------------------------------------------
-        Row {
+        // ---- bottom left: this computer ---------------------------------------------
+        Island {
             anchors.left: parent.left
             anchors.bottom: parent.bottom
-            anchors.margins: Theme.space24
-            height: 44
-            spacing: Theme.space12
+            anchors.margins: Theme.space16
+            interactive: false
+            animateWidth: false
+            text: root.backend.hostName
 
             Image {
                 anchors.verticalCenter: parent.verticalCenter
                 source: root._logoDir + (Theme.dark ? "lugh-lockup-dark.svg" : "lugh-lockup.svg")
-                height: 24
+                height: 16
                 width: Math.round(height * 378.18 / 136)
                 sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio), Math.ceil(height * Screen.devicePixelRatio))
                 smooth: true
@@ -465,81 +489,98 @@ FocusScope {
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 1; height: 16
-                color: Theme.border
+                visible: hostText.visible
+                width: 1; height: 14
+                color: Theme.glassBorder
             }
             Text {
+                id: hostText
                 anchors.verticalCenter: parent.verticalCenter
+                visible: text !== ""
+                width: Math.min(implicitWidth, Math.max(80, Math.min(240, scene.width * 0.2)))
+                elide: Text.ElideRight
                 text: root.backend.hostName
-                font: Theme.typeBodyStrong
+                font: Theme.typeLabel
                 color: Theme.textMuted
+                Accessible.role: Accessible.StaticText
+                Accessible.name: qsTr("Computer name: %1").arg(text)
             }
         }
 
-        GlassPanel {
+        // ---- bottom right: session, keyboard + accessibility, power ----------------
+        Row {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.margins: Theme.space24
-            radius: height / 2
-            elevation: "none"
-            width: bottomRow.implicitWidth + Theme.space8 * 2
-            height: 44
+            anchors.margins: Theme.space16
+            spacing: Theme.space8
 
-            Row {
-                id: bottomRow
-                anchors.verticalCenter: parent.verticalCenter
-                x: Theme.space8
-                spacing: Theme.space4
+            Island {
+                id: sessionIsland
+                visible: root.sessions.length > 1
+                animateWidth: false
+                focusPolicy: Qt.TabFocus
+                active: sessionMenu.visible
+                text: qsTr("Session: %1. Change session").arg(root.currentSession ? root.currentSession.name : "")
+                onClicked: sessionMenu.open()
 
-                Button {
-                    id: sessionButton
+                Icon {
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root.sessions.length > 1
-                    variant: "ghost"
-                    size: "sm"
-                    iconName: "monitor"
+                    name: "monitor"
+                    size: 16
+                    color: Theme.text
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, 160)
+                    elide: Text.ElideRight
                     text: root.currentSession ? root.currentSession.name : ""
-                    focusPolicy: Qt.TabFocus
-                    Accessible.name: qsTr("Session: %1. Change session").arg(text)
-                    onClicked: sessionMenu.open()
-
-                    Menu {
-                        id: sessionMenu
-                        y: -height - Theme.space8
-                        transformOrigin: T.Popup.Bottom
-                        Repeater {
-                            model: root.sessions
-                            delegate: MenuItem {
-                                required property var modelData
-                                required property int index
-                                text: modelData.name
-                                checkable: true
-                                checked: index === root.sessionIndex
-                                onTriggered: root.sessionIndex = index
-                            }
+                    font: Theme.typeLabel
+                    color: Theme.text
+                    Accessible.ignored: true
+                }
+                Menu {
+                    id: sessionMenu
+                    x: -sessionIsland.leftPadding
+                    y: -height - Theme.space8 - 2
+                    transformOrigin: T.Popup.BottomLeft
+                    onClosed: root.focusPassword()
+                    Repeater {
+                        model: root.sessions
+                        delegate: MenuItem {
+                            required property var modelData
+                            required property int index
+                            text: modelData.name
+                            checkable: true
+                            checked: index === root.sessionIndex
+                            onTriggered: root.sessionIndex = index
                         }
                     }
                 }
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: sessionButton.visible
-                    width: 1; height: 16
-                    color: Theme.glassBorder
+                Tooltip {
+                    text: qsTr("Session")
+                    visible: (sessionIsland.hovered || sessionIsland.visualFocus) && !sessionMenu.visible
                 }
-                Button {
+            }
+
+            Island {
+                interactive: false
+                animateWidth: false
+                padding: Theme.space2
+                spacing: 0
+                text: qsTr("Keyboard and accessibility")
+
+                LabelButton {
                     anchors.verticalCenter: parent.verticalCenter
-                    variant: "ghost"
-                    size: "sm"
-                    iconName: "keyboard"
-                    text: root.backend.layout.toUpperCase()
-                    focusPolicy: Qt.TabFocus
-                    Accessible.name: qsTr("Keyboard layout %1. Switch layout").arg(text)
-                    onClicked: root.backend.nextLayout()
+                    visible: (root.backend.layouts || []).length > 1
+                    text: String(root.backend.layout).toUpperCase()
+                    tooltip: qsTr("Keyboard layout %1. Switch layout").arg(text)
+                    onClicked: { root.backend.nextLayout(); root.focusPassword(); }
                 }
                 IconButton {
                     id: a11yButton
                     anchors.verticalCenter: parent.verticalCenter
                     iconName: "person-standing"
+                    iconSize: 16
                     tooltip: qsTr("Accessibility")
                     focusPolicy: Qt.TabFocus
                     checked: a11yMenu.visible
@@ -548,7 +589,7 @@ FocusScope {
                     Menu {
                         id: a11yMenu
                         x: a11yButton.width - width
-                        y: -height - Theme.space8
+                        y: -height - Theme.space8 - 2
                         transformOrigin: T.Popup.BottomRight
                         MenuItem {
                             text: qsTr("Screen reader"); checkable: true
@@ -572,10 +613,21 @@ FocusScope {
                         }
                     }
                 }
+            }
+
+            Island {
+                interactive: false
+                animateWidth: false
+                padding: Theme.space2
+                spacing: 0
+                visible: root.backend.canReboot || root.backend.canPowerOff
+                text: qsTr("Power")
+
                 IconButton {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.backend.canReboot
                     iconName: "rotate-ccw"
+                    iconSize: 16
                     tooltip: qsTr("Restart")
                     focusPolicy: Qt.TabFocus
                     onClicked: confirm.ask("reboot")
@@ -584,6 +636,7 @@ FocusScope {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.backend.canPowerOff
                     iconName: "power"
+                    iconSize: 16
                     tooltip: qsTr("Shut down")
                     focusPolicy: Qt.TabFocus
                     onClicked: confirm.ask("poweroff")
@@ -603,58 +656,36 @@ FocusScope {
         onClosed: root.focusPassword()
     }
 
-    // ---- animations ------------------------------------------------------------------
-    SequentialAnimation {
-        id: leave
-        NumberAnimation {
-            target: content; property: "opacity"; to: 0
-            duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+    // Short text button inside an island (the keyboard layout).
+    component LabelButton: T.Button {
+        id: lb
+        property string tooltip
+        implicitWidth: Math.max(Theme.hitTarget, lbText.implicitWidth + Theme.space8 * 2)
+        implicitHeight: Theme.hitTarget
+        padding: 0
+        focusPolicy: Qt.TabFocus
+        hoverEnabled: true
+        Accessible.role: Accessible.Button
+        Accessible.name: tooltip
+
+        background: Rectangle {
+            radius: height / 2
+            color: lb.down ? Theme.pressedOverlay : lb.hovered ? Theme.hoverOverlay : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.durMicro } }
+            FocusRing { show: lb.visualFocus }
         }
-        ScriptAction { script: root.backend.startSession(root.currentSession ? root.currentSession.exec : "lugh-session") }
-    }
-
-    SequentialAnimation {
-        id: shake
-        NumberAnimation { target: shakeShift; property: "x"; to: -10; duration: 45; easing.type: Easing.OutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 10; duration: 70; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: -7; duration: 65; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 7; duration: 60; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: -3; duration: 55; easing.type: Easing.InOutQuad }
-        NumberAnimation { target: shakeShift; property: "x"; to: 0; duration: 50; easing.type: Easing.OutQuad }
-    }
-
-    // Inline message on a small solid pill (AA on any wallpaper), with an icon.
-    component Message: Rectangle {
-        id: msg
-        property string iconName
-        property color iconColor
-        property color textColor
-        property string text
-        width: msgRow.implicitWidth + Theme.space12 * 2
-        height: 28
-        radius: height / 2
-        color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.88)
-        border.width: 1
-        border.color: Theme.glassBorder
-        Accessible.name: text
-
-        Row {
-            id: msgRow
-            anchors.centerIn: parent
-            spacing: Theme.space8
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: msg.iconName
-                size: 14
-                color: msg.iconColor
-            }
+        contentItem: Item {
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: msg.text
-                font: Theme.typeBodyStrong
-                color: msg.textColor
-                Accessible.ignored: true
+                id: lbText
+                anchors.centerIn: parent
+                text: lb.text
+                font: Theme.typeLabel
+                color: Theme.text
             }
+        }
+        Tooltip {
+            text: lb.tooltip
+            visible: lb.hovered || lb.visualFocus
         }
     }
 }
