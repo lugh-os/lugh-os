@@ -8,9 +8,17 @@ Item {
     id: root
 
     property int topGap: Theme.space8
+    // Bind to the drawer's `expanded`: `entering` is true for a moment after
+    // it opens, which is when rows play their staggered entrance.
+    property bool active: false
+    property bool entering: false
     default property alias content: inner.data
 
     implicitHeight: inner.childrenRect.height + 12 + topGap
+
+    onActiveChanged: { entering = active; if (active) settle.restart(); }
+    Component.onCompleted: if (active) { entering = true; settle.start(); }
+    Timer { id: settle; interval: 400; onTriggered: root.entering = false }
 
     Rectangle {
         y: root.topGap
