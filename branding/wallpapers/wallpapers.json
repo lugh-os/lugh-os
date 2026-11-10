@@ -1,0 +1,74 @@
+{
+  "license": "CC-BY-SA-4.0",
+  "copyright": "2026 Lugh Developers",
+  "default": "dawn",
+  "sizes": [
+    "5120x2880",
+    "3840x2160",
+    "2560x1600",
+    "blur"
+  ],
+  "pattern": "{name}-{variant}-{size}.jpg",
+  "wallpapers": [
+    {
+      "name": "dawn",
+      "title": "Dawn",
+      "description": "A low sun behind long silk dunes. The default Lugh wallpaper.",
+      "uri": "lugh://wallpapers/dawn",
+      "variants": {
+        "light": {
+          "5120x2880": "dawn-light-5120x2880.jpg",
+          "3840x2160": "dawn-light-3840x2160.jpg",
+          "2560x1600": "dawn-light-2560x1600.jpg",
+          "blur": "dawn-light-blur.jpg"
+        },
+        "dark": {
+          "5120x2880": "dawn-dark-5120x2880.jpg",
+          "3840x2160": "dawn-dark-3840x2160.jpg",
+          "2560x1600": "dawn-dark-2560x1600.jpg",
+          "blur": "dawn-dark-blur.jpg"
+        }
+      }
+    },
+    {
+      "name": "tide",
+      "title": "Tide",
+      "description": "Liquid glass: slow folds of warm light with a deep teal counter-tone.",
+      "uri": "lugh://wallpapers/tide",
+      "variants": {
+        "light": {
+          "5120x2880": "tide-light-5120x2880.jpg",
+          "3840x2160": "tide-light-3840x2160.jpg",
+          "2560x1600": "tide-light-2560x1600.jpg",
+          "blur": "tide-light-blur.jpg"
+        },
+        "dark": {
+          "5120x2880": "tide-dark-5120x2880.jpg",
+          "3840x2160": "tide-dark-3840x2160.jpg",
+          "2560x1600": "tide-dark-2560x1600.jpg",
+          "blur": "tide-dark-blur.jpg"
+        }
+      }
+    },
+    {
+      "name": "ember",
+      "title": "Ember",
+      "description": "A quiet sun and its rings. Minimal, made for focus.",
+      "uri": "lugh://wallpapers/ember",
+      "variants": {
+        "light": {
+          "5120x2880": "ember-light-5120x2880.jpg",
+          "3840x2160": "ember-light-3840x2160.jpg",
+          "2560x1600": "ember-light-2560x1600.jpg",
+          "blur": "ember-light-blur.jpg"
+        },
+        "dark": {
+          "5120x2880": "ember-dark-5120x2880.jpg",
+          "3840x2160": "ember-dark-3840x2160.jpg",
+          "2560x1600": "ember-dark-2560x1600.jpg",
+          "blur": "ember-dark-blur.jpg"
+        }
+      }
+    }
+  ]
+}
