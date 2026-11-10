@@ -14,7 +14,11 @@
 #
 # Environment overrides:
 #   LUGH_HYPR_CONFIG   config entry point (default /usr/share/lugh/hypr/lugh.lua)
-#   LUGH_LOW_POWER=1   start with the low-power profile
+#   LUGH_LOW_POWER=1   start with the low-power profile (no blur, shadows or
+#                      animations; the shell draws opaque panels). Set
+#                      automatically when the compositor renders in software
+#                      (llvmpipe: virtual machines, missing GPU driver);
+#                      LUGH_LOW_POWER=0 turns that detection off.
 set -u
 
 LUGH_HYPR_CONFIG=${LUGH_HYPR_CONFIG:-/usr/share/lugh/hypr/lugh.lua}
@@ -26,14 +30,14 @@ LUGH_HYPR_CONFIG=${LUGH_HYPR_CONFIG:-/usr/share/lugh/hypr/lugh.lua}
 # OLDPWD, ...) leaks into every user service, and nothing stale survives.
 SESSION_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP DESKTOP_SESSION
-XDG_SESSION_ID XDG_SEAT XDG_VTNR LUGH_SESSION
+XDG_SESSION_ID XDG_SEAT XDG_VTNR LUGH_SESSION LUGH_LOW_POWER
 XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_SIZE
 QT_QPA_PLATFORM QT_WAYLAND_DISABLE_WINDOWDECORATION GDK_BACKEND
 MOZ_ENABLE_WAYLAND ELECTRON_OZONE_PLATFORM_HINT _JAVA_AWT_WM_NONREPARENTING"
 
 # Removed from the user manager when the session ends (they point at a
 # compositor that no longer exists).
-DISPLAY_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE LUGH_SESSION"
+DISPLAY_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE LUGH_SESSION LUGH_LOW_POWER"
 
 log() {
     printf 'lugh-session: %s\n' "$*" >&2
@@ -85,10 +89,40 @@ stop_session() {
     systemctl --user stop 'app-lugh-*.scope' 2>/dev/null
     # shellcheck disable=SC2086 # list of names
     systemctl --user unset-environment $DISPLAY_VARS 2>/dev/null
+    # Drop the per-login memory limits of auto_low_power.
+    systemctl --user revert lugh-shell.service 2>/dev/null
+    return 0
+}
+
+# True when Hyprland renders with a software rasterizer. Hyprland writes the
+# GL renderer string to its log when it starts.
+software_rendering() {
+    hypr_log="${XDG_RUNTIME_DIR:-/tmp}/hypr/${HYPRLAND_INSTANCE_SIGNATURE:-none}/hyprland.log"
+    [ -r "$hypr_log" ] || return 1
+    grep -qiE 'renderer.*(llvmpipe|softpipe|swrast|software rasterizer)' "$hypr_log"
+}
+
+# Weak or virtual GPUs: switch the compositor and the shell to low power
+# before the shell draws its first frame.
+auto_low_power() {
+    [ -z "${LUGH_LOW_POWER:-}" ] || return 0
+    software_rendering || return 0
+    log "software rendering detected, using the low-power profile"
+    export LUGH_LOW_POWER=1
+    mkdir -p "${XDG_RUNTIME_DIR:-/tmp}/lugh"
+    : > "${XDG_RUNTIME_DIR:-/tmp}/lugh/hypr-low-power"
+    # A software rasterizer keeps every texture and framebuffer in the
+    # shell's own memory (300-550 MB instead of ~170 MB), far above the leak
+    # tripwire of lugh-shell.service: MemoryHigh would throttle the shell to
+    # a standstill. Lift it for this login (reverted when the session ends).
+    systemctl --user set-property --runtime lugh-shell.service \
+        MemoryHigh=infinity MemoryMax=1G 2>/dev/null
+    hyprctl reload config-only >/dev/null 2>&1
     return 0
 }
 
 ready() {
+    auto_low_power
     if ! systemctl --user show-environment >/dev/null 2>&1; then
         # No systemd user manager: start the shell directly so the desktop
         # still works (no restart-on-crash, no portals ordering).
