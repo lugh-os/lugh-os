@@ -18,7 +18,9 @@
 //   --motion <open|type|close> --out <dir>
 //                      grab the scene every ~33 ms into <dir>/<motion>-NN.png
 //                      and log the panel geometry per frame, then quit (pass
-//                      a long qml-shot delay, e.g. 20000).
+//                      a long qml-shot delay, e.g. 20000). The wallpaper is
+//                      left out (a full-scene grab of it takes ~250 ms, which
+//                      would skip the morph) unless --wall is given.
 // Glass: the compositor blurs behind the panel; here GlassPanel draws the
 // pre-blurred wallpaper under itself (Theme.backdrop, GPU renderers only).
 import QtQuick
@@ -32,7 +34,7 @@ Item {
 
     readonly property var args: Qt.application.arguments
     function arg(name, fallback) {
-        const i = args.indexOf(name);
+        const i = args.lastIndexOf(name);    // ours come after qml-shot's own --out/--delay
         return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
     }
     function flag(name) { return args.indexOf(name) >= 0; }
@@ -98,13 +100,13 @@ Item {
     Loader {
         id: blurredWall
         anchors.fill: parent
-        active: demo.configured
+        active: demo.configured && (demo.motion === "" || demo.flag("--wall"))
         sourceComponent: Wallpaper { blurred: true; _useRepo: true }
         onLoaded: Theme.backdrop = item
     }
     Loader {
         anchors.fill: parent
-        active: demo.configured
+        active: demo.configured && (demo.motion === "" || demo.flag("--wall"))
         sourceComponent: Wallpaper { _useRepo: true }
     }
 
