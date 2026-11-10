@@ -1,29 +1,46 @@
-// lugh-shell — production root. Composes the shell surfaces into wlr-layer-shell
-// windows (LayerShellQt) on Hyprland. Run it with scripts/shell-run.sh today;
-// the Rust binary (cxx-qt) loads this same file later.
+// lugh-shell — production root (Lugh mode, "liquid" islands). Composes the
+// shell surfaces into wlr-layer-shell windows (LayerShellQt) on Hyprland.
+// Loaded by the Rust host (ui/shell/src, context objects LughBackend and
+// LughNative); also runs with plain qml6 on the mock Services
+// (scripts/shell-run.sh, nested headless KWin).
 //
-//   per screen:   Wallpaper (background layer) + Bar (top layer, exclusive 30)
-//   primary only: Dock (top layer, exclusive = Dock.exclusiveZone)
+//   every screen:  LockScreen (overlay, exclusive keyboard, only while locked)
+//                  Wallpaper  (background)
+//                  Bar        (top; 52 px tall, exclusive zone 48; input = the
+//                              three islands)
+//                  Dock       (top; bottom edge; input = Dock.inputRect)
 //   active screen (the compositor picks the focused output on every map):
-//                 LughMenu, Launcher, ControlCenter, NotificationCenter,
-//                 NotificationPopups, Osd, LockScreen (overlay layer)
+//                  LughMenu, Launcher, ControlCenter, NotificationCenter
+//                  (overlay, full screen, mapped only while `shown`),
+//                  NotificationPopups (overlay, top-right, content-sized)
+//
+// Start-up order (docs/dev/shell-performance.md):
+//   1. locked at start (restart while locked): the lock windows first, the
+//      desktop behind them only after the lock's first frame;
+//   2. Wallpaper, Bar, Dock synchronously → first frame → Services.shell.ready();
+//   3. the rest one at a time, asynchronously, while idle (or at once when an
+//      overlay is asked for before its turn). `--lazy-overlays` skips step 3:
+//      an overlay is then created on its first open.
 //
 // API notes (details in ui/shell/README.md):
 //   - Only the LayerShellQt QML API of Debian trixie (layer-shell-qt 6.3.4) is
 //     used: layer, anchors, exclusionZone, keyboardInteractivity, scope,
-//     screenConfiguration. `margins` is not used: on Qt 6.8 a QMargins can't be
-//     built from QML ("Unable to assign QJSValue to QMargins"), so toasts carry
-//     their offsets as transparent padding inside the window instead.
+//     screenConfiguration. `margins` can't be set from QML on Qt 6.8, so the
+//     toasts carry their offsets as transparent padding inside the window.
 //   - "On the active screen" uses `wantsToBeOnActiveScreen` when the installed
 //     LayerShellQt has it (6.6+) and `screenConfiguration: ScreenFromCompositor`
 //     otherwise (trixie).
-//   - Input regions: QML can't call QWindow::setMask. When the Rust binary
-//     injects the `LughNative` context object, the Dock and the notification
-//     toasts get exact input regions through LughNative.setInputRegion(window,
-//     [rect…]); without it their transparent headroom/padding takes clicks.
+//   - Input regions go through LughNative.setInputRegion(window, [rect…])
+//     (window coordinates), at most once per frame. Without LughNative (qml6)
+//     the transparent parts of the bar, dock and toast windows take clicks.
 //   - Every surface is created through Qt.createComponent("Lugh.Shell", type):
 //     a surface that is missing or fails to compile logs one warning and the
 //     rest of the shell still runs.
+//
+// Dev flags (after `--`): --dark, --accent <name>, --reduce-motion,
+// --wallpaper-dir <file URL/>, --lazy-overlays, --measure (print the first
+// frame's time), --idle-report <s> (count frames per window for s seconds
+// once settled, print them; scripts/shell-run.sh --nested reads it).
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
@@ -34,22 +51,66 @@ import Lugh.Shell
 QtObject {
     id: shell
 
-    // ---- dev flags (production reads lugh-settingsd instead) --------------
+    // ---- dev flags ----------------------------------------------------------
     readonly property var _args: Qt.application.arguments
     function _arg(name, fallback) {
         const i = _args.indexOf(name);
         return i >= 0 && i + 1 < _args.length ? _args[i + 1] : fallback;
     }
+    readonly property bool lazyOverlays: _args.indexOf("--lazy-overlays") >= 0
+    readonly property int idleReportSecs: Number(_arg("--idle-report", 0))
+
     Component.onCompleted: {
+        // The host attaches before loading this file; qml6 has no backend.
+        if (typeof LughBackend !== "undefined" && LughBackend && !Services.live) Services.attach(LughBackend);
         if (_args.indexOf("--dark") >= 0) Theme.dark = true;
         Theme.accentName = _arg("--accent", Theme.accentName);
         if (_args.indexOf("--reduce-motion") >= 0) Theme.reduceMotion = true;
         const wpDir = _arg("--wallpaper-dir", "");
-        if (wpDir !== "" && "wallpaperDir" in Services.appearance) Services.appearance.wallpaperDir = wpDir;
-        _syncScreens();
+        if (wpDir !== "") Services.appearance.wallpaperDir = wpDir;
+        startLocked = Services.session.locked;
+        _applyLowPower();
+        _syncScreens();     // creates the per-screen windows
     }
 
-    // ---- helpers ----------------------------------------------------------
+    // ---- low power ------------------------------------------------------------
+    // Services.shell.lowPower (software rendering, power saver) forces glass
+    // off and reduced motion on. The user's own values are kept and come back
+    // when it clears; a change that arrives meanwhile is recorded, not shown.
+    property bool _lowPowerOn: false
+    property bool _userTransparency: true
+    property bool _userReduceMotion: false
+    function _applyLowPower() {
+        const on = Services.shell.lowPower === true;
+        if (on === _lowPowerOn) return;
+        if (on) {
+            _userTransparency = Theme.transparency;
+            _userReduceMotion = Theme.reduceMotion;
+            _lowPowerOn = true;
+            Theme.transparency = false;
+            Theme.reduceMotion = true;
+        } else {
+            _lowPowerOn = false;
+            Theme.transparency = _userTransparency;
+            Theme.reduceMotion = _userReduceMotion;
+        }
+    }
+    readonly property Connections _lowPowerWatch: Connections {
+        target: Services.shell
+        function onLowPowerChanged() { shell._applyLowPower(); }
+    }
+    readonly property Connections _themeWatch: Connections {
+        target: Theme
+        enabled: shell._lowPowerOn
+        function onTransparencyChanged() {
+            if (Theme.transparency) { shell._userTransparency = true; Theme.transparency = false; }
+        }
+        function onReduceMotionChanged() {
+            if (!Theme.reduceMotion) { shell._userReduceMotion = false; Theme.reduceMotion = true; }
+        }
+    }
+
+    // ---- helpers --------------------------------------------------------------
     readonly property var _components: ({})
     // Component for a Lugh.Shell surface type, or null (warned once).
     function surface(type) {
@@ -64,25 +125,78 @@ QtObject {
         }
         return _components[type];
     }
-    // Native input-region hook (Rust side). Rects are in window coordinates.
     readonly property bool hasNative: typeof LughNative !== "undefined" && LughNative !== null
-    function setInputRegion(win, rects) {
-        if (hasNative) LughNative.setInputRegion(win, rects);
-    }
     // Ask the compositor to map `attached`'s window on the focused output.
     function placeOnActiveScreen(attached) {
         if ("wantsToBeOnActiveScreen" in attached) attached.wantsToBeOnActiveScreen = true;
         else attached.screenConfiguration = LayerShell.Window.ScreenFromCompositor;
     }
-
-    // True once any bar has drawn its first frame (or after 1 s without one);
-    // deferred surfaces start loading then.
-    property bool firstFrame: false
-    readonly property Timer _firstFrameFallback: Timer {
-        interval: 1000; running: !shell.firstFrame; onTriggered: shell.firstFrame = true
+    // Rects (surface coordinates) moved by (dx, dy) into window coordinates.
+    function offsetRects(rects, dx, dy) {
+        const out = [];
+        for (let i = 0; rects && i < rects.length; ++i) {
+            const r = rects[i];
+            if (r && r.width > 0 && r.height > 0) out.push(Qt.rect(r.x + dx, r.y + dy, r.width, r.height));
+        }
+        return out;
     }
 
-    // ---- screens (hot-plug: delegates are added/removed per output name) --
+    // ---- start-up sequencing ----------------------------------------------------
+    // Locked when the shell started: the desktop waits for the lock's frame.
+    property bool startLocked: false
+    property bool lockFrame: false
+    readonly property bool desktopGate: !startLocked || lockFrame
+    // True once a bar has its first frame on screen.
+    property bool firstFrame: false
+    function _barFrame() {
+        if (firstFrame) return;
+        firstFrame = true;
+        Services.shell.ready();
+        console.info("lugh-shell: first-frame-epoch-ms", Date.now());
+        if (idleReportSecs > 0) _idleSettle.start();
+    }
+    // No frame within 2 s (no output, broken surface): go on anyway.
+    readonly property Timer _frameFallback: Timer {
+        interval: 2000
+        running: !shell.firstFrame || (shell.startLocked && !shell.lockFrame)
+        onTriggered: { shell.lockFrame = true; shell._barFrame(); }
+    }
+    // Deferred windows load one after the other: `stage` is the `order` of
+    // the one whose turn it is.
+    property int stage: 0
+    readonly property Timer _stageStep: Timer {
+        interval: 30
+        onTriggered: shell.stage += 1
+    }
+
+    // ---- idle report (dev) --------------------------------------------------------
+    property bool counting: false
+    readonly property var _windows: []
+    readonly property Timer _idleSettle: Timer {
+        interval: 3000
+        onTriggered: {
+            for (const w of shell._windows) w.frames = 0;
+            shell.counting = true;
+            console.info("lugh-shell: idle-start");
+            shell._idleEnd.start();
+        }
+    }
+    readonly property Timer _idleEnd: Timer {
+        interval: shell.idleReportSecs * 1000
+        onTriggered: {
+            shell.counting = false;
+            let total = 0;
+            const parts = [];
+            for (const w of shell._windows) {
+                total += w.frames;
+                parts.push(w.namespace + (w.screen ? "@" + w.screen.name : "") + "=" + w.frames
+                           + (w.visible ? "" : "(unmapped)"));
+            }
+            console.info("lugh-shell: idle-frames total=" + total + " in " + shell.idleReportSecs + "s: " + parts.join(" "));
+        }
+    }
+
+    // ---- screens (hot-plug: delegates are added/removed per output name) -----------
     readonly property ListModel _screens: ListModel {}
     function screenNamed(name) {
         const list = Qt.application.screens;
@@ -93,7 +207,7 @@ QtObject {
         const names = Qt.application.screens.map(s => s.name);
         for (let i = _screens.count - 1; i >= 0; --i)
             if (names.indexOf(_screens.get(i).name) < 0) _screens.remove(i);
-        names.forEach((n, idx) => {
+        names.forEach(n => {
             let found = false;
             for (let i = 0; i < _screens.count; ++i) if (_screens.get(i).name === n) found = true;
             if (!found) _screens.append({ name: n, primary: false });
@@ -106,7 +220,7 @@ QtObject {
         function onScreensChanged() { shell._syncScreens(); }
     }
 
-    // ---- window templates --------------------------------------------------
+    // ---- window templates ---------------------------------------------------------
     // A transparent layer-shell window holding one surface. `pad*` are
     // transparent margins between the window edge and the surface.
     component LayerWindow: Window {
@@ -116,13 +230,23 @@ QtObject {
         property bool onActiveScreen: false
         property int padTop: 0
         property int padRight: 0
-        property int padBottom: 0
-        // Created asynchronously after the shell's first frame (overlays):
-        // keeps start-up to the bar/dock/wallpaper only.
+        // Synchronous windows load when `load` is true. Deferred ones load
+        // asynchronously after the first frame, when it is their turn
+        // (`order`) or as soon as they are `wanted`, and stay loaded.
+        property bool load: true
         property bool deferred: false
+        property int order: 0
+        property bool wanted: false
+        property bool _latched: false
+        readonly property bool _turn: deferred && shell.firstFrame
+                                      && (wanted || (!shell.lazyOverlays && shell.stage >= order))
+        on_TurnChanged: if (_turn) _latched = true
         readonly property Item surface: loader.item as Item
         readonly property real surfaceImplicitWidth: surface ? surface.implicitWidth : 0
         readonly property real surfaceImplicitHeight: surface ? surface.implicitHeight : 0
+        // Input region in window coordinates; null = the whole window.
+        property var inputRects: null
+        property int frames: 0
 
         color: "transparent"
         flags: Qt.FramelessWindowHint
@@ -136,19 +260,45 @@ QtObject {
             x: 0
             y: lw.padTop
             width: lw.width - lw.padRight
-            height: lw.height - lw.padTop - lw.padBottom
+            height: lw.height - lw.padTop
             focus: true
-            active: !lw.deferred || shell.firstFrame
-            asynchronous: lw.deferred
+            active: lw.deferred ? lw._latched : lw.load
+            // An overlay asked for before its turn is needed now.
+            asynchronous: lw.deferred && !lw.wanted
             sourceComponent: shell.surface(lw.surfaceType)
         }
-        Component.onCompleted: if (onActiveScreen) shell.placeOnActiveScreen(LayerShell.Window)
+        // Its turn and loaded, failed or absent: let the next one load.
+        readonly property bool _done: deferred && shell.firstFrame && !shell.lazyOverlays && shell.stage === order
+                                      && (loader.status === Loader.Ready || loader.status === Loader.Error
+                                          || shell.surface(surfaceType) === null)
+        on_DoneChanged: if (_done) shell._stageStep.start()
+
+        // Input mask, at most once per frame (island widths animate).
+        function _applyMask() {
+            if (shell.hasNative && visible && inputRects !== null) LughNative.setInputRegion(lw, inputRects);
+        }
+        Timer { id: maskTimer; interval: 16; onTriggered: lw._applyMask() }
+        onInputRectsChanged: if (shell.hasNative && visible) maskTimer.start()
+        onVisibleChanged: if (visible) _applyMask()
+
+        Connections {
+            target: lw
+            enabled: shell.counting
+            function onFrameSwapped() { lw.frames += 1; }
+        }
+        Component.onCompleted: {
+            if (onActiveScreen) shell.placeOnActiveScreen(LayerShell.Window);
+            shell._windows.push(lw);
+        }
+        Component.onDestruction: {
+            const i = shell._windows.indexOf(lw);
+            if (i >= 0) shell._windows.splice(i, 1);
+        }
     }
 
     // Full-screen overlay: mapped only while the surface is `shown`, keyboard
     // exclusive while it `wantsKeyboard`.
     component OverlayWindow: LayerWindow {
-        id: ow
         onActiveScreen: true
         deferred: true
         visible: surface !== null && surface.shown === true
@@ -161,7 +311,7 @@ QtObject {
         onVisibleChanged: if (visible) requestActivate()
     }
 
-    // ---- per-screen surfaces ----------------------------------------------
+    // ---- per-screen surfaces ---------------------------------------------------------
     readonly property Instantiator perScreen: Instantiator {
         model: shell._screens
         delegate: QtObject {
@@ -170,10 +320,42 @@ QtObject {
             required property bool primary
             readonly property var screenInfo: shell.screenNamed(name)
 
+            // Lock screen, declared first so a restart while locked maps it
+            // before anything else. GAP: production must use
+            // ext-session-lock-v1 (ui/shell/README.md); this overlay is not a
+            // secure lock (a crash unlocks).
+            readonly property Window lock: LayerWindow {
+                id: lockWin
+                surfaceType: "LockScreen"
+                namespace: "lugh-lock"
+                screen: perScreen.screenInfo
+                width: screen ? screen.width : 0
+                height: screen ? screen.height : 0
+                // Synchronously when locked at start, else lazily (deferred).
+                deferred: !shell.startLocked
+                load: shell.startLocked
+                order: 5
+                wanted: Services.session.locked
+                visible: surface !== null && surface.shown === true
+                LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+                LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorBottom
+                                           | LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorRight
+                LayerShell.Window.keyboardInteractivity: surface && surface.wantsKeyboard
+                                                         ? LayerShell.Window.KeyboardInteractivityExclusive
+                                                         : LayerShell.Window.KeyboardInteractivityNone
+                onVisibleChanged: if (visible && perScreen.primary) requestActivate()
+                Connections {
+                    target: lockWin
+                    enabled: shell.startLocked && !shell.lockFrame
+                    function onFrameSwapped() { shell.lockFrame = true; }
+                }
+            }
+
             readonly property Window wallpaper: LayerWindow {
                 id: wallWin
                 surfaceType: "Wallpaper"
                 namespace: "lugh-wallpaper"
+                load: shell.desktopGate
                 screen: perScreen.screenInfo
                 width: screen ? screen.width : 0
                 height: screen ? screen.height : 0
@@ -185,28 +367,36 @@ QtObject {
             }
 
             readonly property Window bar: LayerWindow {
+                id: barWin
                 surfaceType: "Bar"
                 namespace: "lugh-bar"
+                load: shell.desktopGate
                 screen: perScreen.screenInfo
                 width: screen ? screen.width : 0
-                height: Math.max(1, surfaceImplicitHeight || 30)
+                height: Math.max(1, surfaceImplicitHeight || Theme.barHeight)
                 visible: surface !== null
                 LayerShell.Window.layer: LayerShell.Window.LayerTop
                 LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft
                                            | LayerShell.Window.AnchorRight
-                LayerShell.Window.exclusionZone: height
-                onFrameSwapped: if (!shell.firstFrame) shell.firstFrame = true
+                LayerShell.Window.exclusionZone: surface && surface.exclusiveZone !== undefined
+                                                 ? surface.exclusiveZone : Theme.barExclusiveZone
+                // Only the islands take input; the gaps click through.
+                inputRects: surface && surface.inputRects ? shell.offsetRects(surface.inputRects, 0, 0) : null
+                Connections {
+                    target: barWin
+                    enabled: !shell.firstFrame
+                    function onFrameSwapped() { shell._barFrame(); }
+                }
             }
 
-            // One dock, on the primary output.
             readonly property Window dock: LayerWindow {
-                id: dockWin
-                surfaceType: perScreen.primary ? "Dock" : ""
+                surfaceType: "Dock"
                 namespace: "lugh-dock"
+                load: shell.desktopGate
                 screen: perScreen.screenInfo
                 width: screen ? screen.width : 0
                 height: Math.max(1, surfaceImplicitHeight)
-                visible: perScreen.primary && surface !== null
+                visible: surface !== null
                 LayerShell.Window.layer: LayerShell.Window.LayerTop
                 LayerShell.Window.anchors: LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft
                                            | LayerShell.Window.AnchorRight
@@ -216,74 +406,51 @@ QtObject {
                                                          : LayerShell.Window.KeyboardInteractivityNone
                 // Whole window while a menu is open (outside click closes it),
                 // else only the visible dock.
-                readonly property var inputRects: !surface ? []
+                inputRects: !surface ? null
                     : surface.menuOpen ? [Qt.rect(0, 0, width, height)] : [surface.inputRect]
-                onInputRectsChanged: if (visible) shell.setInputRegion(dockWin, inputRects)
-                onVisibleChanged: if (visible) shell.setInputRegion(dockWin, inputRects)
             }
         }
     }
 
-    // ---- overlays (one each, on the active screen) -------------------------
-    readonly property Window lughMenu: OverlayWindow { surfaceType: "LughMenu"; namespace: "lugh-menu" }
-    readonly property Window launcher: OverlayWindow { surfaceType: "Launcher"; namespace: "lugh-launcher" }
-    readonly property Window controlCenter: OverlayWindow { surfaceType: "ControlCenter"; namespace: "lugh-controlcenter" }
-    readonly property Window notificationCenter: OverlayWindow { surfaceType: "NotificationCenter"; namespace: "lugh-notification-center" }
-
-    // Content-sized windows are mapped as soon as the surface is `shown`, even at
-    // 1×1: positioners and layouts only compute implicit sizes once polished in
-    // a visible window, so gating on the size would never map them.
-    // Toasts: anchored top-right. exclusionZone 0 makes the compositor place
-    // them below the bar's exclusive zone; the 8 px gap is transparent padding.
+    // ---- active-screen surfaces --------------------------------------------------------
+    // Toasts: top-right, content-sized. Exclusion zone 0 puts the window below
+    // the bar's exclusive zone; the rest of the offsets (bar height − zone,
+    // 10 px from the right edge) is transparent padding.
+    // Mapped as soon as there is a popup, even at 1×1: layouts only compute
+    // implicit sizes once polished in a visible window.
     readonly property Window notificationPopups: LayerWindow {
-        id: popupsWin
         surfaceType: "NotificationPopups"
         namespace: "lugh-notifications"
         onActiveScreen: true
         deferred: true
-        padTop: 8
-        padRight: 8
+        order: 0
+        wanted: Services.notifications.popups.count > 0
+        padTop: Theme.barHeight - Theme.barExclusiveZone
+        padRight: 10
         width: Math.max(1, surfaceImplicitWidth + padRight)
         height: Math.max(1, surfaceImplicitHeight + padTop)
-        // Also map on new popups: the surface's `shown` follows its ListView,
-        // which doesn't update while the window is unmapped.
         visible: surface !== null && (surface.shown === true || Services.notifications.popups.count > 0)
         LayerShell.Window.layer: LayerShell.Window.LayerOverlay
         LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorRight
         LayerShell.Window.exclusionZone: 0
-        readonly property rect inputRect: Qt.rect(0, padTop, surfaceImplicitWidth, surfaceImplicitHeight)
-        onInputRectChanged: if (visible) shell.setInputRegion(popupsWin, [inputRect])
-        onVisibleChanged: if (visible) shell.setInputRegion(popupsWin, [inputRect])
+        inputRects: !surface ? null
+            : surface.inputRects ? shell.offsetRects(surface.inputRects, 0, padTop)
+            : [Qt.rect(0, padTop, surfaceImplicitWidth, surfaceImplicitHeight)]
     }
-
-    // Dock exclusive zone on the primary screen (0 when hidden / no dock).
-    readonly property int dockZone: {
-        for (let i = 0; i < shell.perScreen.count; ++i) {
-            const o = shell.perScreen.objectAt(i);
-            if (o && o.primary && o.dock.surface) return o.dock.surface.exclusiveZone;
-        }
-        return 0;
+    readonly property Window launcher: OverlayWindow {
+        surfaceType: "Launcher"; namespace: "lugh-launcher"
+        order: 1; wanted: ShellState.launcherOpen
     }
-
-    // OSD: bottom centre, 96 px above the screen edge but at least 24 px above
-    // the dock's exclusive zone (exclusion zone -1, so the offset is ours).
-    // Takes no input at all, so the padding below it is free.
-    readonly property Window osd: LayerWindow {
-        surfaceType: "Osd"
-        namespace: "lugh-osd"
-        onActiveScreen: true
-        deferred: true
-        padBottom: Math.max(96, shell.dockZone + 24)
-        flags: Qt.FramelessWindowHint | Qt.WindowTransparentForInput
-        width: Math.max(1, surfaceImplicitWidth)
-        height: Math.max(1, surfaceImplicitHeight + padBottom)
-        visible: surface !== null && surface.shown === true
-        LayerShell.Window.layer: LayerShell.Window.LayerOverlay
-        LayerShell.Window.anchors: LayerShell.Window.AnchorBottom
+    readonly property Window controlCenter: OverlayWindow {
+        surfaceType: "ControlCenter"; namespace: "lugh-controlcenter"
+        order: 2; wanted: ShellState.controlCenterOpen
     }
-
-    // Lock screen. GAP: production must use ext-session-lock-v1 (spec FR-6),
-    // which QML can't reach; this overlay is NOT a secure lock (a crash
-    // unlocks, other outputs stay visible). See ui/shell/README.md.
-    readonly property Window lockScreen: OverlayWindow { surfaceType: "LockScreen"; namespace: "lugh-lock" }
+    readonly property Window notificationCenter: OverlayWindow {
+        surfaceType: "NotificationCenter"; namespace: "lugh-notification-center"
+        order: 3; wanted: ShellState.notificationCenterOpen
+    }
+    readonly property Window lughMenu: OverlayWindow {
+        surfaceType: "LughMenu"; namespace: "lugh-menu"
+        order: 4; wanted: ShellState.lughMenuOpen
+    }
 }
