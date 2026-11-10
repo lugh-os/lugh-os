@@ -1,0 +1,8 @@
+ui/shell/session/lugh-session usr/bin/
+ui/shell/session/lugh.desktop usr/share/wayland-sessions/
+ui/shell/hypr/lugh.lua usr/share/lugh/hypr/
+ui/shell/hypr/conf.d usr/share/lugh/hypr/
+ui/shell/hypr/lugh usr/share/lugh/hypr/
+ui/shell/hypr/scripts usr/share/lugh/hypr/
+ui/shell/hypr/lugh-portals.conf usr/share/xdg-desktop-portal/
+ui/shell/session/lugh-xdg-terminals.list usr/share/xdg-terminal-exec/
