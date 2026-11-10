@@ -1,0 +1,28 @@
+{
+    "address": "0x5a3e1d2c4a00",
+    "mapped": true,
+    "hidden": false,
+    "at": [26, 52],
+    "size": [1868, 1002],
+    "workspace": {
+        "id": 1,
+        "name": "1"
+    },
+    "floating": true,
+    "pseudo": false,
+    "monitor": 0,
+    "class": "firefox",
+    "title": "Lugh — Mozilla Firefox",
+    "initialClass": "firefox",
+    "initialTitle": "Mozilla Firefox",
+    "pid": 2731,
+    "xwayland": false,
+    "pinned": false,
+    "fullscreen": 0,
+    "fullscreenClient": 0,
+    "grouped": [],
+    "tags": [],
+    "swallowing": "0x0",
+    "focusHistoryID": 0,
+    "inhibitingIdle": false
+}
