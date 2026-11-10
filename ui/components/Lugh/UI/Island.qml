@@ -111,8 +111,11 @@ T.Button {
             anchors.fill: parent
             radius: control.radius
             antialiasing: true
-            color: control.active || control._down ? Theme.pressedOverlay
-                 : control.interactive && control.hovered ? Theme.hoverOverlay : "transparent"
+            // Dark glass must not get lighter on hover/active (muted text over a
+            // bright wallpaper would fall below AA), so dark mode darkens instead.
+            color: control.active || control._down ? (Theme.dark ? Qt.rgba(0, 0, 0, 0.22) : Theme.pressedOverlay)
+                 : control.interactive && control.hovered ? (Theme.dark ? Qt.rgba(0, 0, 0, 0.12) : Theme.hoverOverlay)
+                 : "transparent"
             Behavior on color { ColorAnimation { duration: Theme.durMicro } }
 
             FocusRing { show: control.visualFocus }
