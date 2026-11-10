@@ -57,3 +57,20 @@ function batteryDescription(p) {
         return qsTr("Battery %1%, %2 left").arg(v).arg(p.timeRemaining);
     return qsTr("Battery %1%").arg(v);
 }
+
+function bluetoothShown(b) { return b.available && b.enabled && b.connectedCount > 0; }
+
+// One spoken line for the whole status island:
+// "Status: Wi-Fi: Kigali Heights 5G, strong signal; Volume 62%; Battery 64%".
+function summary(n, b, a, p, k) {
+    const parts = [];
+    if (k.layouts.length > 1)
+        parts.push(qsTr("Keyboard %1").arg(k.current.toUpperCase()));
+    parts.push(networkDescription(n));
+    if (bluetoothShown(b))
+        parts.push(qsTr("Bluetooth: %n device(s) connected", "", b.connectedCount));
+    parts.push(volumeDescription(a));
+    if (p.hasBattery)
+        parts.push(batteryDescription(p));
+    return qsTr("Status: %1").arg(parts.join("; "));
+}
