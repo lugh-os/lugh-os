@@ -1,0 +1,8 @@
+#!/bin/sh
+# A live image boots "for the first time" on every boot: /etc and /var look
+# older than /usr, so systemd runs its update units (ldconfig.service alone
+# costs several seconds). Nothing needs updating in a freshly built image:
+# mark /etc and /var as up to date, as systemd-update-done.service would.
+set -e
+ldconfig
+touch /etc/.updated /var/.updated
