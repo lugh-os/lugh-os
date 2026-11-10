@@ -32,7 +32,8 @@ Item {
     readonly property var args: Qt.application.arguments
     function has(flag) { return args.indexOf(flag) >= 0; }
     function arg(name, fallback) {
-        const i = args.indexOf(name);
+        // The last one wins: the qml-shot harness has its own --out before ours.
+        const i = args.lastIndexOf(name);
         return i >= 0 && i + 1 < args.length && !args[i + 1].startsWith("--") ? args[i + 1] : fallback;
     }
     readonly property string motion: arg("--motion", "")
