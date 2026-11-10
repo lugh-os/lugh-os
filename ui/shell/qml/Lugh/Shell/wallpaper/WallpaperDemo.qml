@@ -1,18 +1,18 @@
-// Demo of the default wallpaper: Dawn (light) and Dusk (dark) side by side,
-// each with a mock bar and dock whose "glass" is the pre-blurred wallpaper
-// (the same trick the preview uses instead of a runtime blur), and below them
-// the blurred variants on their own (lock screen).
+// Demo of the bundled wallpaper set (Dawn, Tide, Ember) on one sheet: for each,
+// the light and the dark variant with mock Lugh-mode islands and dock whose
+// "glass" is the pre-blurred wallpaper (the same trick the preview uses
+// instead of a runtime blur), and the two blurred variants (lock screen).
 //
 //   QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh \
-//       ui/shell/qml/Lugh/Shell/wallpaper/WallpaperDemo.qml /tmp/lugh-shots/wallpaper/demo.png 1440 900
+//       ui/shell/qml/Lugh/Shell/wallpaper/WallpaperDemo.qml /tmp/lugh-shots/wallpaper/set.png 1600 1000
 import QtQuick
 import Lugh.UI
 import Lugh.Shell
 
 Rectangle {
     id: demo
-    width: 1440
-    height: 900
+    width: 1600
+    height: 1000
     color: "#EEECE7"
 
     component Caption: Text {
@@ -30,7 +30,7 @@ Rectangle {
             // the blurred art, positioned as if it filled the whole tile
             x: -g.x; y: -g.y
             width: g.host.width; height: g.host.height
-            dark: g.host.dark; blurred: true
+            dark: g.host.dark; blurred: true; name: g.host.name; _useRepo: true
         }
         Rectangle {
             anchors.fill: parent
@@ -46,32 +46,38 @@ Rectangle {
     component Desktop: Item {
         id: desk
         property bool dark: false
-        readonly property color glassTint: dark ? Qt.rgba(28 / 255, 27 / 255, 25 / 255, 0.70) : Qt.rgba(1, 1, 1, 0.72)
+        property string name: "dawn"
+        readonly property color glassTint: dark ? Qt.rgba(28 / 255, 27 / 255, 25 / 255, 0.82) : Qt.rgba(1, 1, 1, 0.72)
         readonly property color ink: dark ? "#EDEBE6" : "#1C1B19"
         clip: true
 
-        Wallpaper { anchors.fill: parent; dark: desk.dark }
+        Wallpaper { anchors.fill: parent; dark: desk.dark; name: desk.name; _useRepo: true }
 
-        Glass {
-            host: desk
-            x: 0; y: 0; width: desk.width; height: 30
-            Text { x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Files    Edit    View"; font: Theme.typeBodyStrong; color: desk.ink }
-            Text { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                   text: "Tue 10 Nov  09:41"; font: Theme.typeBodyTnum; color: desk.ink }
+        // the three islands (36 px tall in the shell; scaled to the tile)
+        Repeater {
+            model: [{ x: 5, w: 96 }, { x: (desk.width - 74) / 2, w: 74 }, { x: desk.width - 5 - 70, w: 70 }]
+            Glass {
+                required property var modelData
+                host: desk
+                x: modelData.x; y: 4; width: modelData.w; height: 18; radius: 9
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width - 24; height: 3; radius: 1.5
+                    color: desk.ink; opacity: 0.85
+                }
+            }
         }
         Glass {
             host: desk
-            // the dock pill (the blurred backdrop is clipped square; at the calm
-            // bottom of the art the corners are indistinguishable)
-            width: 8 * 52 + 16; height: 64; radius: Theme.radiusXl
-            x: (desk.width - width) / 2; y: desk.height - height - 12
+            width: 8 * 26 + 12; height: 32; radius: 16
+            x: (desk.width - width) / 2; y: desk.height - height - 5
             Row {
                 anchors.centerIn: parent
-                spacing: 8
+                spacing: 4
                 Repeater {
                     model: 8
                     Rectangle {
-                        width: 44; height: 44; radius: 11
+                        width: 22; height: 22; radius: 6
                         color: index === 0 ? (desk.dark ? "#F2A93B" : "#E8962E")
                                            : (desk.dark ? "#3A3732" : "#D8D4CC")
                     }
@@ -82,32 +88,25 @@ Rectangle {
 
     Column {
         anchors.centerIn: parent
-        spacing: 12
+        spacing: 14
 
-        Row {
-            spacing: 16
+        Repeater {
+            model: [{ name: "dawn", title: "Dawn" }, { name: "tide", title: "Tide" }, { name: "ember", title: "Ember" }]
             Column {
+                id: rowItem
+                required property var modelData
                 spacing: 6
-                Caption { text: "Dawn (light) · Wallpaper { dark: false }" }
-                Desktop { width: 696; height: 435; dark: false }
-            }
-            Column {
-                spacing: 6
-                Caption { text: "Dusk (dark) · Wallpaper { dark: true }" }
-                Desktop { width: 696; height: 435; dark: true }
-            }
-        }
-        Row {
-            spacing: 16
-            Column {
-                spacing: 6
-                Caption { text: "Dawn · blurred: true (lock screen, glass backdrops)" }
-                Wallpaper { width: 696; height: 300; dark: false; blurred: true }
-            }
-            Column {
-                spacing: 6
-                Caption { text: "Dusk · blurred: true" }
-                Wallpaper { width: 696; height: 300; dark: true; blurred: true }
+                Caption { text: rowItem.modelData.title + " · Wallpaper { name: \"" + rowItem.modelData.name + "\" } · light, dark, blurred light, blurred dark" }
+                Row {
+                    spacing: 12
+                    Desktop { width: 496; height: 279; name: rowItem.modelData.name; dark: false }
+                    Desktop { width: 496; height: 279; name: rowItem.modelData.name; dark: true }
+                    Column {
+                        spacing: 9
+                        Wallpaper { width: 240; height: 135; name: rowItem.modelData.name; dark: false; blurred: true; _useRepo: true }
+                        Wallpaper { width: 240; height: 135; name: rowItem.modelData.name; dark: true; blurred: true; _useRepo: true }
+                    }
+                }
             }
         }
     }
