@@ -58,7 +58,7 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             text: root.text
             font: Theme.typeBody
-            lineHeight: Theme.lineBody
+            lineHeight: lineCount > 1 ? Theme.lineBody : 1
             color: Theme.text
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
