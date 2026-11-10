@@ -43,7 +43,7 @@ done
 # ---- headless nested KWin ----------------------------------------------------
 # Starts kwin_wayland --virtual (no window on the desktop), points the
 # environment at it. The caller's EXIT trap must call stop_nested.
-kwin_pid=""
+kwin_pid="" nested_bus_pid=""
 start_nested() {
   local size="$1"
   command -v kwin_wayland >/dev/null || { echo "shell-run: nested mode needs kwin_wayland" >&2; exit 2; }
@@ -52,8 +52,16 @@ start_nested() {
     # glvnd would otherwise pick the NVIDIA EGL on hybrid laptops.
     export __EGL_VENDOR_LIBRARY_FILENAMES="$mesa"
   fi
+  # Private session bus for the nested KWin. On the desktop's bus it registers
+  # its shortcuts under the host KWin's "kwin" kglobalaccel component and, on
+  # exit, deactivates them all (Meta+Tab, Meta+W, ... stop working on the host).
+  local bus
+  bus="$(dbus-daemon --session --fork --nopidfile --print-address=1 --print-pid=1)" \
+    || { echo "shell-run: could not start a private D-Bus for nested KWin" >&2; exit 2; }
+  nested_bus_pid="$(sed -n 2p <<<"$bus")"
   local sock="lugh-nested-$$"
-  kwin_wayland --virtual --no-lockscreen --socket "$sock" \
+  DBUS_SESSION_BUS_ADDRESS="$(sed -n 1p <<<"$bus")" \
+    kwin_wayland --virtual --no-lockscreen --socket "$sock" \
     --width "${size%x*}" --height "${size#*x}" --output-count "${LUGH_NESTED_OUTPUTS:-1}" \
     >/dev/null 2>&1 &
   kwin_pid=$!
@@ -62,7 +70,11 @@ start_nested() {
   export WAYLAND_DISPLAY="$sock" QT_QPA_PLATFORM=wayland QT_WAYLAND_DISABLE_WINDOWDECORATION=1
   export LUGH_NESTED=1
 }
-stop_nested() { [[ -n "$kwin_pid" ]] && kill "$kwin_pid" 2>/dev/null || true; }
+stop_nested() {
+  [[ -n "$kwin_pid" ]] && kill "$kwin_pid" 2>/dev/null
+  [[ -n "$nested_bus_pid" ]] && kill "$nested_bus_pid" 2>/dev/null
+  true
+}
 
 if [[ $mode == nested-exec ]]; then
   [[ $# -gt 0 ]] || { echo "shell-run: --nested-exec needs a command" >&2; exit 2; }
@@ -144,6 +156,7 @@ case "$mode" in
     rss=$(awk '/^VmRSS/ {print $2}' "/proc/$shell_pid/status" 2>/dev/null || echo 0)
     peak=$(awk '/^VmHWM/ {print $2}' "/proc/$shell_pid/status" 2>/dev/null || echo 0)
     threads=$(awk '/^Threads/ {print $2}' "/proc/$shell_pid/status" 2>/dev/null || echo 0)
+    split=$(awk '/^RssAnon/ {a=$2} /^RssFile/ {f=$2} /^RssShmem/ {s=$2} END {printf "anon %d + file %d + shmem %d", a/1024, f/1024, s/1024}' "/proc/$shell_pid/status" 2>/dev/null || true)
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
     grep -vE 'first-frame-epoch-ms|idle-start' "$log" || true
@@ -151,7 +164,7 @@ case "$mode" in
     frame_ms=$(sed -n 's/.*first-frame-epoch-ms \([0-9]*\).*/\1/p' "$log" | head -1)
     hz=$(getconf CLK_TCK)
     echo "shell-run: first frame $((frame_ms - start_ms)) ms after exec"
-    echo "shell-run: RSS $((rss / 1024)) MB at idle (peak $((peak / 1024)) MB), $threads threads"
+    echo "shell-run: RSS $((rss / 1024)) MB at idle (peak $((peak / 1024)) MB; $split), $threads threads"
     echo "shell-run: idle CPU $(((t2 - t1) * 1000 / hz)) ms over ${nested_secs}s"
     if grep -qE '^(warning|critical|fatal): ' "$log"; then
       echo "shell-run: QML warnings above" >&2; exit 1
