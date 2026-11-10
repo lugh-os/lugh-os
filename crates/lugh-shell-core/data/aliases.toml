@@ -1,0 +1,95 @@
+# Windows names → Lugh targets for the launcher (docs/specs/shell.md §Launcher).
+#
+# Built into lugh-shell-core; /usr/share/lugh/launcher/aliases.toml, when
+# present, is merged on top (its entries win for the same name).
+#
+# Each [[alias]] has `names` (typed lowercase, matched by prefix from 3
+# characters, or exactly) and one target:
+#   apps = [ids…]          first installed app id wins, then
+#   categories = [cats…]   first installed app (non-terminal preferred) with one
+#                          of these desktop Categories
+#   setting = "page/path"  a settings page (with `title`, optional `icon`)
+#   help = "~/path"        a help card that opens a file (with `title`,
+#                          `subtitle`, optional `icon`)
+# `requires = "app-id"` hides a setting/help alias unless that app is installed.
+# The result subtitle reads "Matches ‘<name>’".
+
+[[alias]]
+names = ["control panel", "control", "pc settings"]
+apps = ["lugh-settings"]
+
+[[alias]]
+names = ["task manager", "taskmgr", "resource monitor", "end task"]
+apps = ["lugh-tasks"]
+categories = ["Monitor"]
+
+[[alias]]
+names = ["add or remove programs", "programs and features", "apps and features", "uninstall a program", "microsoft store", "windows store"]
+apps = ["lugh-store"]
+categories = ["PackageManager"]
+
+[[alias]]
+names = ["cmd", "command prompt", "powershell", "windows terminal", "terminal", "console"]
+apps = ["lugh-terminal", "org.codeberg.dnkl.foot", "foot", "org.kde.konsole", "org.gnome.Console", "qterminal", "xterm"]
+categories = ["TerminalEmulator"]
+
+[[alias]]
+names = ["device manager", "devices and printers"]
+setting = "devices"
+title = "Devices"
+icon = "cpu"
+requires = "lugh-settings"
+
+[[alias]]
+names = ["regedit", "registry editor", "registry"]
+help = "~/.config/lugh/desktop.toml"
+title = "Lugh has no registry"
+subtitle = "Desktop settings live in ~/.config/lugh/desktop.toml"
+icon = "file-cog"
+
+[[alias]]
+names = ["notepad", "wordpad", "notepad++"]
+apps = ["featherpad", "org.gnome.TextEditor", "org.kde.kate", "mousepad"]
+categories = ["TextEditor"]
+
+[[alias]]
+names = ["file explorer", "windows explorer", "explorer", "my computer", "this pc"]
+apps = ["lugh-files", "pcmanfm-qt", "org.gnome.Nautilus", "org.kde.dolphin", "thunar"]
+categories = ["FileManager"]
+
+[[alias]]
+names = ["internet explorer", "microsoft edge", "edge"]
+apps = ["firefox", "firefox-esr", "org.mozilla.firefox"]
+categories = ["WebBrowser"]
+
+[[alias]]
+names = ["windows media player", "media player", "groove music", "movies and tv"]
+apps = ["vlc", "org.videolan.VLC"]
+categories = ["Player"]
+
+[[alias]]
+names = ["photos", "windows photo viewer", "photo viewer"]
+apps = ["qimgv", "org.gnome.Loupe", "org.kde.gwenview"]
+categories = ["Viewer"]
+
+[[alias]]
+names = ["calc", "calculator"]
+apps = ["qalculate-qt", "org.gnome.Calculator", "org.kde.kcalc", "galculator"]
+categories = ["Calculator"]
+
+[[alias]]
+names = ["paint", "ms paint"]
+categories = ["RasterGraphics"]
+
+[[alias]]
+names = ["snipping tool", "snip and sketch", "print screen"]
+apps = ["lugh-screenshot", "flameshot", "org.flameshot.Flameshot"]
+
+[[alias]]
+names = ["disk management", "diskmgmt"]
+apps = ["gnome-disks", "org.gnome.DiskUtility", "partitionmanager", "org.kde.partitionmanager", "gparted"]
+
+[[alias]]
+names = ["winrar", "7-zip", "7zip"]
+apps = ["lxqt-archiver", "org.gnome.FileRoller", "org.kde.ark"]
+categories = ["Archiving"]
