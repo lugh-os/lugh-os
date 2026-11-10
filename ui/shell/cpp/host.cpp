@@ -1,0 +1,228 @@
+// lugh-shell's Qt host: everything cxx-qt-lib does not expose. Rust's `main`
+// parses the command line and calls lugh_host_run(); this file owns the
+// QGuiApplication, the QML engine and the two context objects:
+//
+//   LughBackend  the Rust `Backend` QObject (src/backend.rs); null with --mock
+//   LughNative   native helpers (native.h)
+#include "lugh-shell/cpp/host.h"
+#include "lugh-shell/cpp/native.h"
+#include "lugh-shell/src/bridge.cxxqt.h"
+
+#include <QtCore/QAtomicInt>
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
+#include <QtCore/QThread>
+#include <QtCore/QTimer>
+#include <QtCore/QUrl>
+#include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
+#include <QtGui/QGuiApplication>
+#include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlContext>
+
+#include <cstdio>
+#include <vector>
+
+namespace {
+
+QAtomicInt g_warnings = 0;
+// First few warnings, for the --check result line.
+QStringList *g_firstWarnings = nullptr;
+
+// Qt messages (QML errors and console.* included) → the Rust logger.
+void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+    int level = 1;
+    switch (type) {
+    case QtDebugMsg: level = 0; break;
+    case QtInfoMsg: level = 1; break;
+    case QtWarningMsg: level = 2; break;
+    case QtCriticalMsg:
+    case QtFatalMsg: level = 3; break;
+    }
+    if (level >= 2) {
+        g_warnings.fetchAndAddRelaxed(1);
+        // Only filled on the GUI thread during --check; other threads just count.
+        if (g_firstWarnings && g_firstWarnings->size() < 3
+            && QThread::currentThread() == QCoreApplication::instance()->thread())
+            g_firstWarnings->append(message.simplified().left(160));
+    }
+    lugh_qt_log(level, QString::fromUtf8(context.category ? context.category : "default"), message);
+}
+
+void setEnvDefault(const char *name, const char *value)
+{
+    if (!qEnvironmentVariableIsSet(name))
+        qputenv(name, value);
+}
+
+// The requested theme when installed, else the first installed of the
+// fallback chain. hicolor always "exists" (it is the spec's last resort).
+QString pickIconTheme(const QString &requested)
+{
+    const QStringList chain{requested, QStringLiteral("Papirus"), QStringLiteral("breeze"),
+                            QStringLiteral("Adwaita")};
+    for (const QString &name : chain) {
+        if (!name.isEmpty() && LughNative::isIconThemeInstalled(name))
+            return name;
+    }
+    return QStringLiteral("hicolor");
+}
+
+} // namespace
+
+bool LughNative::isIconThemeInstalled(const QString &name)
+{
+    if (name.isEmpty() || name.contains(QLatin1Char('/')))
+        return false;
+    const QStringList paths = QIcon::themeSearchPaths();
+    for (const QString &path : paths) {
+        if (QFileInfo::exists(path + QLatin1Char('/') + name + QStringLiteral("/index.theme")))
+            return true;
+    }
+    return false;
+}
+
+void lugh_host_quit(int code)
+{
+    QCoreApplication::exit(code);
+}
+
+int lugh_host_run(const QString &args, const QString &mainQml, const QString &importPaths,
+                  const QString &iconTheme, bool mock, bool check)
+{
+    // ---- environment: defaults only, the session's values win ---------------
+    if (check)
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    setEnvDefault("QT_QPA_PLATFORM", "wayland");
+    setEnvDefault("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
+    setEnvDefault("QSG_RENDER_LOOP", "threaded");
+    setEnvDefault("QT_QUICK_CONTROLS_STYLE", "Basic");
+
+    qInstallMessageHandler(messageHandler);
+
+    // argv must outlive the application.
+    static std::vector<QByteArray> argStore;
+    static std::vector<char *> argv;
+    static int argc = 0;
+    const QStringList argList = args.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &a : argList)
+        argStore.push_back(a.toLocal8Bit());
+    for (QByteArray &a : argStore)
+        argv.push_back(a.data());
+    argc = int(argv.size());
+    argv.push_back(nullptr);
+
+    // Layer surfaces are translucent: every window needs an alpha channel, and
+    // it must be asked for before the first window exists.
+    QQuickWindow::setDefaultAlphaBuffer(true);
+
+    QGuiApplication app(argc, argv.data());
+    QGuiApplication::setApplicationName(QStringLiteral("lugh-shell"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("lugh-shell"));
+    // The shell lives as long as the session, not as long as a window is mapped.
+    QGuiApplication::setQuitOnLastWindowClosed(false);
+
+    const QString theme = pickIconTheme(iconTheme);
+    QIcon::setFallbackThemeName(QStringLiteral("hicolor"));
+    QIcon::setThemeName(theme);
+    if (theme != iconTheme)
+        qInfo("icon theme \"%s\" is not installed; using \"%s\"", qUtf8Printable(iconTheme),
+              qUtf8Printable(theme));
+
+    if (QFontDatabase::hasFamily(QStringLiteral("Inter"))) {
+        QFont font = QGuiApplication::font();
+        font.setFamily(QStringLiteral("Inter"));
+        QGuiApplication::setFont(font);
+    } else {
+        qInfo("font \"Inter\" is not installed; using the system default");
+    }
+
+    QStringList firstWarnings;
+    if (check)
+        g_firstWarnings = &firstWarnings;
+
+    // Declared before the engine: destroyed after it, so QML never sees a
+    // dangling backend. Destroying it drops the Rust core (services stop,
+    // children are reaped).
+    Backend backend;
+    LughNative native;
+    const int started = backend.start(mock);
+    if (started == 1)
+        return 0; // another lugh-shell is running
+    if (started != 0)
+        return 1;
+
+    int code = 1;
+    {
+        QQmlApplicationEngine engine;
+        const QStringList paths = importPaths.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        for (const QString &path : paths)
+            engine.addImportPath(path);
+        QQmlContext *root = engine.rootContext();
+        root->setContextProperty(QStringLiteral("LughNative"), &native);
+        root->setContextProperty(QStringLiteral("LughBackend"), mock ? nullptr : &backend);
+
+        // Attach the backend before main.qml is loaded: the surfaces are then
+        // created on real data straight away (no mock rows built and thrown
+        // away, the snapshot is applied before the first frame).
+        bool attached = false;
+        if (!mock) {
+            if (QObject *services = engine.singletonInstance<QObject *>("Lugh.Shell", "Services")) {
+                attached = QMetaObject::invokeMethod(services, "attach",
+                                                     Q_ARG(QVariant, QVariant::fromValue<QObject *>(&backend)));
+            }
+            if (!attached)
+                qCritical("Lugh.Shell Services singleton unavailable: the shell runs on mock data");
+        }
+
+        const QUrl mainUrl = mainQml.startsWith(QLatin1String("qrc:")) ? QUrl(mainQml)
+                                                                        : QUrl::fromLocalFile(mainQml);
+        engine.load(mainUrl);
+        const bool loaded = !engine.rootObjects().isEmpty();
+        if (!loaded) {
+            qCritical("could not load %s", qUtf8Printable(mainUrl.toString()));
+            if (check)
+                std::printf("lugh-shell check: FAILED (main.qml did not load: %s)\n",
+                            qUtf8Printable(firstWarnings.join(QStringLiteral(" | "))));
+            return 1;
+        }
+        const double loadedMs = lugh_uptime_ms();
+        qInfo("qml loaded: %.0f ms since start, Qt %s, platform %s", loadedMs, qVersion(),
+              qUtf8Printable(QGuiApplication::platformName()));
+
+        // Time to the first frame of any window (logged once).
+        auto *firstFrame = new QObject(&app);
+        const auto windows = QGuiApplication::allWindows();
+        for (QWindow *w : windows) {
+            if (auto *qw = qobject_cast<QQuickWindow *>(w)) {
+                QObject::connect(qw, &QQuickWindow::frameSwapped, firstFrame, [firstFrame]() {
+                    qInfo("first frame: %.0f ms since start", lugh_uptime_ms());
+                    firstFrame->deleteLater(); // drops every connection
+                }, Qt::QueuedConnection);
+            }
+        }
+
+        if (check) {
+            // Long enough for the deferred surfaces (created after the first
+            // frame, or after main.qml's 1 s fallback) to load and complain.
+            QTimer::singleShot(1600, &app, [&]() {
+                const int warnings = g_warnings.loadRelaxed();
+                const bool live = mock || (attached && backend.snapshots() > 0);
+                const bool ok = warnings == 0 && live;
+                std::printf("lugh-shell check: %s (%lld root object(s), backend %s, %d warning(s), "
+                            "qml loaded in %.0f ms%s%s)\n",
+                            ok ? "ok" : "FAILED", static_cast<long long>(engine.rootObjects().size()),
+                            mock ? "mock" : live ? "attached, snapshot received" : "NOT attached",
+                            warnings, loadedMs, firstWarnings.isEmpty() ? "" : ": ",
+                            qUtf8Printable(firstWarnings.join(QStringLiteral(" | "))));
+                std::fflush(stdout);
+                QCoreApplication::exit(ok ? 0 : 1);
+            });
+        }
+
+        code = QGuiApplication::exec();
+        g_firstWarnings = nullptr;
+    } // engine and every window are gone here; backend and native still alive
+    return code;
+}
