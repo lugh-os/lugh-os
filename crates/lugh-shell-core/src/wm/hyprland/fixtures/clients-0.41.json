@@ -1,0 +1,53 @@
+[{
+    "address": "0x55d4a8c3e0f0",
+    "mapped": true,
+    "hidden": false,
+    "at": [10, 40],
+    "size": [1900, 1030],
+    "workspace": {
+        "id": 1,
+        "name": "1"
+    },
+    "floating": false,
+    "monitor": 0,
+    "class": "firefox",
+    "title": "Mozilla Firefox",
+    "initialClass": "firefox",
+    "initialTitle": "Mozilla Firefox",
+    "pid": 1844,
+    "xwayland": false,
+    "pinned": false,
+    "fullscreen": true,
+    "fullscreenMode": 0,
+    "fakeFullscreen": false,
+    "grouped": [],
+    "tags": [],
+    "swallowing": "0x0",
+    "focusHistoryID": 0
+},{
+    "address": "0x55d4a8c41a20",
+    "mapped": true,
+    "hidden": false,
+    "at": [300, 200],
+    "size": [900, 600],
+    "workspace": {
+        "id": -98,
+        "name": "special:magic"
+    },
+    "floating": true,
+    "monitor": 0,
+    "class": "pavucontrol",
+    "title": "Volume Control",
+    "initialClass": "pavucontrol",
+    "initialTitle": "Volume Control",
+    "pid": 2010,
+    "xwayland": false,
+    "pinned": false,
+    "fullscreen": false,
+    "fullscreenMode": 0,
+    "fakeFullscreen": false,
+    "grouped": [],
+    "tags": [],
+    "swallowing": "0x0",
+    "focusHistoryID": 1
+}]
