@@ -15,5 +15,19 @@ else
 	exit 1
 fi
 
+# live-build's bootstrap stage snapshots Debian's /usr/lib/os-release into a
+# regular /etc/os-release (plus IMAGE_ID/BUILD_ID), so lugh-branding's
+# diversion of /usr/lib/os-release never reaches it. Rebuild it from Lugh's
+# file, keeping live-build's live-image fields.
+if ! grep -q '^ID=lugh$' /usr/lib/os-release; then
+	echo "E: lugh-branding: /usr/lib/os-release is not Lugh's" >&2
+	exit 1
+fi
+live_fields="$(grep -E '^(IMAGE_ID|BUILD_ID)=' /etc/os-release 2>/dev/null || true)"
+rm -f /etc/os-release
+cp /usr/lib/os-release /etc/os-release
+[ -z "$live_fields" ] || printf '%s\n' "$live_fields" >> /etc/os-release
+echo "I: lugh-branding: /etc/os-release is now Lugh's"
+
 # Rebuild every installed kernel's initramfs with the theme in it.
 update-initramfs -u -k all
