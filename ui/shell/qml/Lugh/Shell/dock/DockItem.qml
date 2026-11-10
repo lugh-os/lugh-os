@@ -1,11 +1,18 @@
-// One dock tile: app icon, running dots, attention dot, hover tooltip, focus
-// ring, launch bounce. Used by Dock for apps and for the Trash. Purely visual
-// plus pointer input; the Dock owns keyboard navigation and the context menu.
+// One dock tile (docs/design/lugh-mode.md §3): app icon, ember (running
+// indicator), attention ring, focus ring, press squish, launch hop. Used by
+// Dock for apps and for the Trash. Purely visual plus pointer input; the Dock
+// owns keyboard navigation, the hover label and the context menu.
 //
-// Geometry: the item is as tall as the dock pill (iconSize + 2 × padding) and
-// as wide as its icon slot (iconSize × mag), plus a divider slot on the left
-// when `leadingDivider`. The icon grows upward from the pill's icon line when
-// magnified, and the tooltip floats above it, outside the item.
+// Geometry: the tile is a fixed slot: `iconSize` wide (plus a divider slot on
+// the left when `leadingDivider`) and `topRoom + padding + iconSize +
+// bottomPadding` tall, where `topRoom` is clear space above the pill for the
+// magnified icon. Magnify never changes the slot: the Dock hands the tile a
+// scale (`mag`) and a horizontal displacement (`shift`, `dividerShift`) and
+// only the artwork moves, so the pointer hit areas stay put.
+//
+// The artwork is rasterised once at `iconSize × artScale` (the largest size
+// magnify can ask for) and scaled down, so a magnified icon stays crisp
+// without re-rasterising per frame.
 import QtQuick
 import Lugh.UI
 
@@ -14,15 +21,17 @@ Item {
 
     property string iconName: ""
     property string label: ""
-    property int iconSize: 56
-    property int padding: Theme.space8
-    property int bottomPadding: Theme.space12
-    // Magnification of this tile (1 = none) and the texture oversampling the
-    // Dock picked so a magnified icon stays sharp (1, or the max magnify).
+    property int iconSize: 48
+    property int padding: 6
+    property int bottomPadding: 10
+    property int topRoom: 0
     property real mag: 1
     property real artScale: 1
-    property bool magnifying: false
+    property real shift: 0
+    property real dividerShift: 0
     property bool leadingDivider: false
+    // Plain hover plate instead of magnify (magnify off, or reduce motion).
+    property bool hoverPlate: false
 
     property bool running: false
     property int windows: 0
@@ -30,26 +39,24 @@ Item {
     property bool launching: false
     property bool attention: false
 
-    // Hover from the pointer or forced by the Dock (debug / keyboard focus).
+    // Hover from the pointer or forced by the Dock (debug).
     property bool forceHover: false
-    property bool tooltipAllowed: true
     property string accessibleName: label
 
-    // The square the icon is drawn in (for anchoring menus, focus rings).
-    readonly property Item iconBox: lift
+    // The square the icon rests in (menu origin, focus ring).
+    readonly property Item iconBox: box
     readonly property bool hovered: mouse.containsMouse || forceHover
     readonly property bool pressed: mouse.pressed && (mouse.pressedButtons & Qt.LeftButton) !== 0
+    readonly property int dividerSlot: leadingDivider ? 9 : 0
+    // Icon centre x in the tile, un-magnified.
+    readonly property real centerX: dividerSlot + iconSize / 2
 
     signal activated()
     signal middleClicked()
     signal contextRequested()
 
-    readonly property int _dividerSlot: leadingDivider ? 1 + Theme.space8 : 0
-    readonly property real _slot: iconSize * mag
-
-    width: _dividerSlot + _slot
-    height: iconSize + padding + bottomPadding
-    z: hovered || activeFocus ? 2 : 0
+    width: dividerSlot + iconSize
+    height: topRoom + padding + iconSize + bottomPadding
 
     activeFocusOnTab: false
     Accessible.role: Accessible.Button
@@ -57,157 +64,166 @@ Item {
     Accessible.focusable: true
     Accessible.onPressAction: tile.activated()
 
-    // ---- divider (pinned | running, apps | trash) -------------------------
+    component Snappy: SpringAnimation {
+        spring: Theme.snappySpring; damping: Theme.snappyDamping; mass: Theme.snappyMass
+    }
+
+    // ---- divider hairline (pinned | running, apps | trash) ----------------
     Rectangle {
         visible: tile.leadingDivider
-        x: 0
+        x: 2 + tile.dividerShift
+        y: tile.topRoom + tile.padding + Math.round((tile.iconSize - height) / 2)
         width: 1
-        height: Math.round(tile.iconSize * 0.62)
-        y: tile.padding + Math.round((tile.iconSize - height) / 2)
-        color: Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.16)
+        height: Math.round(tile.iconSize * 0.5)
+        color: Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.14)
         Accessible.ignored: true
     }
 
     // ---- icon -------------------------------------------------------------
-    // Launch bounce lives on its own wrapper so it never fights the hover lift.
     Item {
-        id: bounce
-        x: tile._dividerSlot
-        y: tile.padding + tile.iconSize - tile._slot
-        width: tile._slot
-        height: tile._slot
+        id: box
+        readonly property real radius: Math.round(width * 0.26)
+        x: tile.dividerSlot + tile.shift
+        y: tile.topRoom + tile.padding
+        width: tile.iconSize
+        height: tile.iconSize
+
+        // Hover / pressed plate when the icon does not magnify.
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -3
+            radius: box.radius + 3
+            visible: tile.hoverPlate && (tile.hovered || tile.pressed)
+            color: tile.pressed ? Theme.pressedOverlay : Theme.hoverOverlay
+        }
 
         Item {
             id: hopper
             width: parent.width
             height: parent.height
+            opacity: tile._breath
 
             Item {
-                id: lift
-                readonly property real radius: Math.round(width * 0.26)
+                id: scaler
                 width: parent.width
                 height: parent.height
-                y: tile.hovered && !tile.magnifying && !Theme.reduceMotion ? -Theme.space4 : 0
-                Behavior on y {
-                    NumberAnimation { duration: Theme.durMicro; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
-                }
+                transformOrigin: Item.Bottom
+                scale: tile.mag
 
-                AppIcon {
-                    id: art
+                Squish {
                     anchors.centerIn: parent
-                    size: Math.round(tile.iconSize * tile.artScale)
-                    iconName: tile.iconName
-                    fallbackText: tile.label
-                    // Rendered at size × artScale, shown at the slot size.
-                    scale: (tile._slot / size) * (tile.pressed && !Theme.reduceMotion ? 0.94 : 1)
-                    opacity: tile.pressed && Theme.reduceMotion ? 0.75 : 1
-                    Behavior on scale {
-                        enabled: !tile.magnifying
-                        NumberAnimation { duration: Theme.durMicro; easing.type: Easing.OutCubic }
+                    pressed: tile.pressed
+                    Item {
+                        width: tile.iconSize
+                        height: tile.iconSize
+                        AppIcon {
+                            size: Math.round(tile.iconSize * tile.artScale)
+                            iconName: tile.iconName
+                            fallbackText: tile.label
+                            transformOrigin: Item.TopLeft
+                            scale: tile.iconSize / size
+                        }
                     }
                 }
 
-                // Needs-attention dot: shape on the corner, not color alone; the
-                // accessible name says it too.
-                Badge {
-                    dot: true
-                    tone: "accent"
-                    _outline: Theme.surface
-                    x: parent.width - width * 0.75
-                    y: -height * 0.25
+                // Needs attention: a ring badge on the corner (shape, not
+                // color alone; the accessible name says it too).
+                Rectangle {
+                    id: ring
+                    width: 10
+                    height: 10
+                    radius: 5
+                    x: parent.width - width + 1
+                    y: -1
+                    color: Theme.surface
+                    border.width: 3
+                    border.color: Theme.focusRing
+                    antialiasing: true
                     opacity: tile.attention ? 1 : 0
                     visible: opacity > 0
-                    scale: tile.attention || Theme.reduceMotion ? 1 : 0.4
                     Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durSmall) } }
-                    Behavior on scale { NumberAnimation { duration: Theme.durSmall; easing.type: Easing.OutBack } }
-                }
-
-                FocusRing {
-                    target: lift
-                    show: tile.activeFocus
                 }
             }
         }
 
-        // Launching: a gentle hop (or, under reduce motion, a soft pulse)
-        // until the app reports a window.
-        SequentialAnimation {
-            id: hop
-            running: tile.launching && !Theme.reduceMotion
-            loops: Animation.Infinite
-            alwaysRunToEnd: true
-            NumberAnimation { target: hopper; property: "y"; to: -10; duration: 260; easing.type: Easing.OutQuad }
-            NumberAnimation { target: hopper; property: "y"; to: 0; duration: 420; easing.type: Easing.OutBounce }
-            PauseAnimation { duration: 260 }
-        }
-        SequentialAnimation {
-            running: tile.launching && Theme.reduceMotion
-            loops: Animation.Infinite
-            alwaysRunToEnd: true
-            NumberAnimation { target: hopper; property: "opacity"; to: 0.5; duration: 600; easing.type: Easing.InOutSine }
-            NumberAnimation { target: hopper; property: "opacity"; to: 1; duration: 600; easing.type: Easing.InOutSine }
+        FocusRing {
+            target: box
+            show: tile.activeFocus
         }
     }
 
-    // ---- running indicator ------------------------------------------------
-    // One dot per window, up to 3. The focused app's first dot is an accent
-    // pill: wider (shape) and accent (color).
+    // ---- launch: one soft hop, then breathe until the app has a window ----
+    property real _breath: 1
+    onLaunchingChanged: {
+        if (launching) {
+            if (!Theme.reduceMotion) hop.restart();
+            breathe.restart();
+        } else {
+            breathe.stop();
+            settle.restart();
+        }
+    }
+    Component.onCompleted: if (launching) breathe.start()
+    SequentialAnimation {
+        id: hop
+        NumberAnimation { target: hopper; property: "y"; to: -Math.min(10, tile.iconSize * 0.2); duration: 150; easing.type: Easing.OutCubic }
+        SpringAnimation {
+            target: hopper; property: "y"; to: 0
+            spring: Theme.liquidSpring; damping: Theme.liquidDamping; mass: Theme.liquidMass; epsilon: 0.05
+        }
+    }
+    SequentialAnimation {
+        id: breathe
+        loops: Animation.Infinite
+        NumberAnimation { target: tile; property: "_breath"; to: 0.5; duration: 800; easing.type: Easing.InOutSine }
+        NumberAnimation { target: tile; property: "_breath"; to: 1; duration: 800; easing.type: Easing.InOutSine }
+    }
+    NumberAnimation { id: settle; target: tile; property: "_breath"; to: 1; duration: Theme.durSmall }
+
+    // ---- ember: running indicator ------------------------------------------
+    // A 4 px dot when running, a 14 px capsule for the focused app, a second
+    // dot for two or more windows: the shape carries the state.
     Row {
-        id: dots
-        x: tile._dividerSlot + Math.round((tile._slot - width) / 2)
-        y: tile.padding + tile.iconSize + 3
+        id: ember
+        x: tile.centerX + tile.shift - width / 2
+        y: tile.topRoom + tile.padding + tile.iconSize + 3
         spacing: 3
         opacity: tile.running ? 1 : 0
+        visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durSmall) } }
 
-        Repeater {
-            model: tile.running ? Math.max(1, Math.min(tile.windows, 3)) : 0
-            Rectangle {
-                required property int index
-                readonly property bool lead: tile.focusedApp && index === 0
-                width: lead ? 10 : 4
-                height: 4
-                radius: 2
-                color: lead ? Theme.accent : Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.7)
-                antialiasing: true
-                Behavior on width { NumberAnimation { duration: Theme.dur(Theme.durSmall); easing.type: Easing.OutCubic } }
-                Behavior on color { ColorAnimation { duration: Theme.durSmall } }
-            }
+        Rectangle {
+            id: lead
+            width: tile.focusedApp ? 14 : 4
+            height: 4
+            radius: 2
+            color: Theme.focusRing
+            antialiasing: true
+            Behavior on width { enabled: !Theme.reduceMotion; Snappy { epsilon: 0.05 } }
+        }
+        Rectangle {
+            width: 4
+            height: 4
+            radius: 2
+            color: Theme.focusRing
+            antialiasing: true
+            visible: tile.running && tile.windows >= 2
         }
     }
-
-    // ---- tooltip ----------------------------------------------------------
-    Rectangle {
-        id: tip
-        readonly property bool shown: (tile.hovered || tile.activeFocus) && tile.tooltipAllowed && tile.label !== ""
-        x: tile._dividerSlot + Math.round((tile._slot - width) / 2)
-        y: bounce.y + hopper.y + lift.y - height - Theme.space8
-        width: tipText.implicitWidth + 2 * Theme.space12
-        height: tipText.implicitHeight + 2 * (Theme.space4 + 1)
-        radius: height / 2
-        color: Theme.text
-        opacity: shown ? 1 : 0
-        visible: opacity > 0
-        Behavior on opacity {
-            NumberAnimation { duration: Theme.dur(Theme.durMicro); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
-        }
-        Accessible.ignored: true
-
-        Text {
-            id: tipText
-            anchors.centerIn: parent
-            text: tile.label
-            font: Theme.typeCaption
-            color: Theme.bg
-            Accessible.ignored: true
-        }
+    // Attention: the ember pulses gently twice; the ring badge stays.
+    onAttentionChanged: if (attention && running && !Theme.reduceMotion) pulse.restart()
+    SequentialAnimation {
+        id: pulse
+        loops: 2
+        NumberAnimation { target: ember; property: "scale"; to: 1.8; duration: 260; easing.type: Easing.InOutSine }
+        NumberAnimation { target: ember; property: "scale"; to: 1; duration: 340; easing.type: Easing.InOutSine }
     }
 
     // ---- pointer ----------------------------------------------------------
     MouseArea {
         id: mouse
-        x: tile._dividerSlot
-        width: tile._slot
+        x: tile.dividerSlot
+        width: tile.iconSize
         height: parent.height
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
