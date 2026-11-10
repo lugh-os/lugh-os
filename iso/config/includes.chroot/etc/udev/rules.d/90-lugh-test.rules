@@ -1,0 +1,4 @@
+# Live image test mode (scripts/test-desktop.sh): only when the hypervisor
+# offers a virtio-serial port named "space.lugh.test" does the image start a
+# root command agent on it. Real hardware has no such port.
+SUBSYSTEM=="virtio-ports", ATTR{name}=="space.lugh.test", TAG+="systemd", ENV{SYSTEMD_WANTS}+="lugh-test-agent.service lugh-test-markers.service"
