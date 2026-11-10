@@ -1,0 +1,4 @@
+# IconNames.qml loads the icon font relative to the module
+# (../../../fonts/lucide.ttf); it is an application resource, not a system font.
+font-in-non-font-package [usr/share/lugh/qml/fonts/lucide.ttf]
+font-outside-font-dir [usr/share/lugh/qml/fonts/lucide.ttf]
