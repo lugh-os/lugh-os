@@ -19,4 +19,5 @@ Description: Lugh OS identity and boot look
     "quiet splash" kernel command line in /etc/default/grub.d/lugh.cfg;
   - the Lugh Plymouth boot splash (logo, progress line, passphrase prompt),
     made the default theme on installation;
-  - the Lugh logo, wordmark and lugh-logo application icon.
+  - the Lugh logo, wordmark and lugh-logo application icon;
+  - the Lugh wallpapers (/usr/share/backgrounds/lugh).
