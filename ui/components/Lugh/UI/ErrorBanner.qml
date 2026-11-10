@@ -58,10 +58,18 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             text: root.text
             font: Theme.typeBody
-            lineHeight: lineCount > 1 ? Theme.lineBody : 1
+            // Wrapped text gets the body line height. Decided from the measured
+            // single-line width, not lineCount (that would be a binding loop).
+            lineHeight: messageMetrics.advanceWidth > width + 0.5 ? Theme.lineBody : 1
             color: Theme.text
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
+
+            TextMetrics {
+                id: messageMetrics
+                font: message.font
+                text: message.text
+            }
         }
 
         Button {
