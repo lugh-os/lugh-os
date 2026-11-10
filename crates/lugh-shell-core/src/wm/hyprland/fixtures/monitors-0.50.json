@@ -1,0 +1,98 @@
+[{
+    "id": 0,
+    "name": "eDP-1",
+    "description": "BOE 0x0BCA",
+    "make": "BOE",
+    "model": "0x0BCA",
+    "serial": "",
+    "width": 2256,
+    "height": 1504,
+    "physicalWidth": 290,
+    "physicalHeight": 190,
+    "refreshRate": 59.99900,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 1,
+        "name": "1"
+    },
+    "specialWorkspace": {
+        "id": 0,
+        "name": ""
+    },
+    "reserved": [0, 30, 0, 0],
+    "scale": 1.50,
+    "transform": 0,
+    "focused": true,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "activelyTearing": false,
+    "directScanoutTo": "0",
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": ["2256x1504@60.00Hz","2256x1504@48.00Hz"]
+},{
+    "id": 1,
+    "name": "HDMI-A-1",
+    "description": "Dell Inc. DELL U2720Q 7ZXW123",
+    "make": "Dell Inc.",
+    "model": "DELL U2720Q",
+    "serial": "7ZXW123",
+    "width": 3840,
+    "height": 2160,
+    "physicalWidth": 600,
+    "physicalHeight": 340,
+    "refreshRate": 60.00000,
+    "x": 1504,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 5,
+        "name": "music, loud"
+    },
+    "specialWorkspace": {
+        "id": 0,
+        "name": ""
+    },
+    "reserved": [0, 0, 0, 0],
+    "scale": 2.00,
+    "transform": 0,
+    "focused": false,
+    "dpmsStatus": true,
+    "vrr": false,
+    "solitary": "0",
+    "activelyTearing": false,
+    "directScanoutTo": "0",
+    "disabled": false,
+    "currentFormat": "XRGB8888",
+    "mirrorOf": "none",
+    "availableModes": ["3840x2160@60.00Hz"]
+},{
+    "id": 2,
+    "name": "DP-3",
+    "description": "",
+    "make": "",
+    "model": "",
+    "serial": "",
+    "width": 0,
+    "height": 0,
+    "refreshRate": 0,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+        "id": -1,
+        "name": ""
+    },
+    "specialWorkspace": {
+        "id": 0,
+        "name": ""
+    },
+    "reserved": [0, 0, 0, 0],
+    "scale": 1.00,
+    "transform": 0,
+    "focused": false,
+    "dpmsStatus": false,
+    "vrr": false,
+    "disabled": true
+}]
