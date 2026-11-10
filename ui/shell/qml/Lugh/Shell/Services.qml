@@ -178,6 +178,7 @@ QtObject {
         // True when a window on the active workspace overlaps the dock area
         // (drives dock auto-hide).
         property bool dockOverlapped: false
+        property bool available: true   // false ⇒ no compositor connection (dev host, reconnecting)
         // roles: winId (string), appId, title, workspace (int), focused (bool)
         property ListModel toplevels: ListModel {
             ListElement { winId: "0x1"; appId: "firefox"; title: "Lugh — Mozilla Firefox"; workspace: 1; focused: true }
@@ -234,6 +235,8 @@ QtObject {
         }
         // Emitted when an app fails to start (dock shows an inline toast).
         signal launchFailed(string appId, string message)
+        // Re-reads the app list if the applications dirs changed (the launcher calls it on open).
+        function rescan() { services._call("apps.rescan", []); }
 
         function nameFor(appId) {
             for (let i = 0; i < installed.count; ++i)
@@ -455,6 +458,7 @@ QtObject {
     // ---- trash (gio / XDG trash spec) -------------------------------------
     property QtObject trash: QtObject {
         property bool full: true
+        function refresh() { services._call("trash.refresh", []); }
         function open() { if (services._call("trash.open", [])) return; console.info("[mock] open trash"); }
         function empty() { if (services._call("trash.empty", [])) return; full = false; }
     }
