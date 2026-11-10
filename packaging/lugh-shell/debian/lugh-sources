@@ -1,0 +1,8 @@
+# Repo paths copied into the build tree (scripts/build-debs.sh). The Rust
+# sources are not copied: debian/rules builds them in the checkout (see
+# scripts/build-env/cargo-deb-build.sh).
+ui/shell/qml/main.qml
+ui/shell/qml/Lugh
+ui/shell/session/systemd
+ui/shell/session/space.lugh.Shell1.service
+crates/lugh-shell-core/data
