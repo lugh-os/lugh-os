@@ -1,0 +1,5 @@
+# Lugh desktop settings of this user (docs/specs/settings.md).
+# The live image pins the apps of the Minimal profile; Lugh's own Files,
+# Store and Settings apps take these places when they ship.
+[dock]
+pinned = ["firefox", "pcmanfm-qt", "foot", "vlc"]
