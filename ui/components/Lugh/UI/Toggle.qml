@@ -55,6 +55,10 @@ T.Switch {
             color: control.enabled && control.down ? Qt.tint(_base, Theme.pressedOverlay)
                  : control.enabled && control.hovered ? Qt.tint(_base, Theme.hoverOverlay) : _base
             Behavior on color { ColorAnimation { duration: Theme.dur(Theme.durSmall) } }
+            // The off fill alone is ~1.5:1 on surface; the hairline carries
+            // the 3:1 non-text contrast (textMuted is > 6:1 on bg/surface).
+            border.width: control.checked ? 0 : 1
+            border.color: Theme.textMuted
 
             FocusRing { show: control.visualFocus }
         }
