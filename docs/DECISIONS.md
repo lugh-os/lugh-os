@@ -132,3 +132,10 @@ Status values: **Accepted**, **Proposed** (not yet confirmed), **Superseded by A
 **Status:** Proposed, 2026-11-09
 **Decision:** The founder's mark (a charcoal "L" `#2A2420` with an amber sun `#EE9A2E`) replaces the "lugh" text placeholder. The art keeps its own colors exactly. The UI `accent` token stays `#E8962E`, because its AA contrast pairs are already measured. Logo files live in `branding/logo/`, and a dark-background variant (light "L" `#EDEBE6`) is used on dark surfaces.
 **Open:** the founder may prefer to unify both on one amber. If so, change it in one place and re-run `scripts/render-brand-assets.sh`.
+
+## ADR-026: Hyprland from trixie-backports, configured in Lua
+**Status:** Accepted, 2026-11-10
+**Decision:** The interim compositor (ADR-012) is Hyprland **0.55.x from trixie-backports** (trixie main ships none). Its config is written in **Lua** (`ui/shell/hypr/lugh.lua` + `conf.d/*.lua`), not hyprlang `.conf`: `.conf` is legacy in 0.55 and removed in 0.57. The session starts it with `start-hyprland -- --config /usr/share/lugh/hypr/lugh.lua`. Generated per-mode files are Lua (`~/.config/lugh/generated/*.lua`) followed by `hyprctl reload config-only`; this replaces the `hyprland-<mode>.conf` wording in specs/shell.md. Socket2 events and `hyprctl -j` JSON are unchanged, so `lugh-shell-core::wm::hyprland` is unaffected.
+**Alternatives:** pin an older hyprlang-based release in the Lugh repo (packaging burden, dead end at 0.57).
+**Consequences:** `scripts/verify-config.sh` checks the config against backports and sid. Details in [dev/hyprland.md](dev/hyprland.md).
+
