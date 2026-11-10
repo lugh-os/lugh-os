@@ -2,10 +2,13 @@
 // QML-facing API. This file is the **mock** backend used by the preview, the
 // demos and QML tests: plausible data, simulated delays and failures.
 //
-// Contract: the Rust core (crates/lugh-shell-core, bridged with cxx-qt) will
-// expose objects with exactly these property, model-role, function and signal
-// names. Surfaces must only use what is declared here; if a surface needs more,
-// add it here (mock + comment) so the Rust side knows to implement it.
+// Contract (docs/specs/shell-bridge.md): the Rust core (crates/lugh-shell-core,
+// `services::*`) keeps a state object per service with exactly these property
+// and model-role names, and handles exactly these functions. When a backend is
+// attached (`Services.attach(backend)`), every function call is forwarded to it
+// and its patches/signals are applied here; with no backend the mock bodies
+// below run instead. Surfaces must only use what is declared here; if a surface
+// needs more, add it here (mock + comment) so the Rust side implements it.
 //
 // Dev conveniences in the mock:
 //   - Wi-Fi password "wrong" fails; anything else connects after ~1.2 s.
@@ -18,6 +21,88 @@ import Lugh.UI
 QtObject {
     id: services
 
+    // ---- backend bridge ----------------------------------------------------
+    // A backend is any object with `call(method: string, argsJson: string)` and
+    // a signal `event(json: string)`: the cxx-qt `LughBackend` in production,
+    // `backend/WsBackend.qml` against lugh-shell-devd in development.
+    property var backend: null
+    readonly property bool live: backend !== null
+    // ListModel key roles (rows are matched by key so delegates survive updates).
+    readonly property var _keys: ({
+        "wm.workspaces": "wsId", "wm.toplevels": "winId", "apps.installed": "appId", "apps.dock": "appId",
+        "launcher.recent": "appId", "notifications.popups": "nid", "notifications.history": "nid",
+        "network.networks": "ssid", "bluetooth.devices": "address", "audio.outputs": "devId",
+        "audio.inputs": "devId", "audio.streams": "streamId"
+    })
+    readonly property var _serviceNames: ["session", "wm", "apps", "launcher", "notifications", "trash", "network",
+        "bluetooth", "audio", "display", "power", "media", "keyboard", "appearance", "osd", "shell"]
+
+    // Forwards a call to the backend. Returns false when running on the mock.
+    function _call(method, args) {
+        if (!backend) return false;
+        backend.call(method, JSON.stringify(args || []));
+        return true;
+    }
+    // Switches from mock data to a live backend: clears every model, then asks
+    // for a snapshot (answered with a {"t":"snapshot"} event).
+    function attach(b) {
+        if (!b) return;
+        for (const n of _serviceNames) {
+            const svc = services[n];
+            for (const k in svc) {
+                const v = svc[k];
+                if (v && typeof v === "object" && typeof v.clear === "function" && typeof v.count === "number") v.clear();
+            }
+        }
+        launcher.query = "";
+        launcher.resultsQuery = "";
+        backend = b;
+        b.event.connect(_onEvent);
+        b.call("core.snapshot", "[]");
+    }
+    function _onEvent(json) {
+        let e;
+        try { e = JSON.parse(json); } catch (err) { console.warn("Services: bad event", err); return; }
+        if (e.t === "snapshot") {
+            for (const n in e.d) if (services[n]) _applyPatch(n, services[n], e.d[n]);
+        } else if (e.t === "patch") {
+            if (services[e.s]) _applyPatch(e.s, services[e.s], e.d);
+        } else if (e.t === "signal") {
+            const svc = services[e.s];
+            if (svc && typeof svc[e.n] === "function") svc[e.n].apply(svc, e.a || []);
+            else console.warn("Services: unknown signal", e.s, e.n);
+        }
+    }
+    function _applyPatch(name, svc, d) {
+        // Launcher answers carry the query they belong to; drop stale ones.
+        if (name === "launcher" && d.query !== undefined && d.query !== svc.query) return;
+        if (name === "launcher" && d.results !== undefined && d.query !== undefined) svc.resultsQuery = d.query;
+        for (const k in d) {
+            const v = d[k], cur = svc[k];
+            if (name === "appearance" && k === "dark") { Theme.dark = v; continue; }
+            if (name === "appearance" && k === "accent") { Theme.accentName = v; continue; }
+            if (name === "appearance" && k === "reduceMotion") { Theme.reduceMotion = v; continue; }
+            if (name === "appearance" && k === "transparency") { Theme.transparency = v; continue; }
+            if (name === "appearance" && k === "wallpaperDir" && v === "") continue;   // keep the preview's dir
+            if (cur === undefined) { console.warn("Services: unknown property", name + "." + k); continue; }
+            if (Array.isArray(v) && cur && typeof cur === "object" && typeof cur.setProperty === "function")
+                _sync(cur, v, _keys[name + "." + k]);
+            else
+                svc[k] = v;
+        }
+    }
+    function _sync(model, arr, key) {
+        for (let i = 0; i < arr.length; ++i) {
+            const item = arr[i];
+            let j = key ? -1 : (i < model.count ? i : -1);
+            if (key) for (let k = i; k < model.count; ++k) if (model.get(k)[key] === item[key]) { j = k; break; }
+            if (j < 0) { model.insert(i, item); continue; }
+            if (j !== i) model.move(j, i, 1);
+            model.set(i, item);
+        }
+        if (model.count > arr.length) model.remove(arr.length, model.count - arr.length);
+    }
+
     // ---- session ----------------------------------------------------------
     property QtObject session: QtObject {
         property string userName: "amara"
@@ -26,23 +111,25 @@ QtObject {
         property string hostName: "lugh-laptop"
         property string osVersion: "Lugh 0.1 (Phase 1 preview)"
         property bool locked: false
+        property bool canSuspend: true
+        property string lastError: ""        // power/logout failures, plain language
         property bool authenticating: false
         property string authError: ""        // plain-language, "" when none
         signal unlocked()
 
-        function lock() { authError = ""; locked = true; }
+        function lock() { if (services._call("session.lock", [])) return; authError = ""; locked = true; }
         // Async: sets authenticating, then either `locked = false` + unlocked()
         // or authError = "Wrong password. Try again."
-        function unlock(password) {
+        function unlock(password) { if (services._call("session.unlock", [password])) return;
             authenticating = true;
             authError = "";
             _authTimer.password = password;
             _authTimer.restart();
         }
-        function logout() { console.info("[mock] logout"); }
-        function restart() { console.info("[mock] restart"); }
-        function shutdown() { console.info("[mock] shutdown"); }
-        function suspend() { console.info("[mock] suspend"); lock(); }
+        function logout() { if (services._call("session.logout", [])) return; console.info("[mock] logout"); }
+        function restart() { if (services._call("session.restart", [])) return; console.info("[mock] restart"); }
+        function shutdown() { if (services._call("session.shutdown", [])) return; console.info("[mock] shutdown"); }
+        function suspend() { if (services._call("session.suspend", [])) return; console.info("[mock] suspend"); lock(); }
 
         property Timer _authTimer: Timer {
             property string password
@@ -97,8 +184,8 @@ QtObject {
             ListElement { winId: "0x2"; appId: "org.codeberg.dnkl.foot"; title: "amara@lugh-laptop: ~"; workspace: 1; focused: false }
             ListElement { winId: "0x3"; appId: "vlc"; title: "VLC media player"; workspace: 2; focused: false }
         }
-        function switchWorkspace(wsId) { activeWorkspace = wsId; }
-        function activate(winId) {
+        function switchWorkspace(wsId) { services._call("wm.switchWorkspace", [wsId]); activeWorkspace = wsId; }
+        function activate(winId) { if (services._call("wm.activate", [winId])) return;
             for (let i = 0; i < toplevels.count; ++i) {
                 const t = toplevels.get(i);
                 toplevels.setProperty(i, "focused", t.winId === winId);
@@ -110,7 +197,7 @@ QtObject {
                 }
             }
         }
-        function close(winId) {
+        function close(winId) { if (services._call("wm.close", [winId])) return;
             for (let i = 0; i < toplevels.count; ++i)
                 if (toplevels.get(i).winId === winId) { toplevels.remove(i); break; }
             services.apps._syncRunning();
@@ -159,7 +246,7 @@ QtObject {
             return "application-x-executable";
         }
         // Focuses the app if running, else launches it in its own scope.
-        function activate(appId) {
+        function activate(appId) { if (services._call("apps.activate", [appId])) return;
             for (let i = 0; i < services.wm.toplevels.count; ++i) {
                 const t = services.wm.toplevels.get(i);
                 if (t.appId === appId) { services.wm.activate(t.winId); return; }
@@ -167,24 +254,24 @@ QtObject {
             launch(appId);
         }
         // Always starts a new instance (middle click, "New window").
-        function launch(appId) {
+        function launch(appId) { if (services._call("apps.launch", [appId])) return;
             const idx = _dockIndex(appId);
             if (idx >= 0) dock.setProperty(idx, "launching", true);
             _launchTimer.queue.push(appId);
             _launchTimer.start();
         }
-        function quit(appId) {
+        function quit(appId) { if (services._call("apps.quit", [appId])) return;
             for (let i = services.wm.toplevels.count - 1; i >= 0; --i)
                 if (services.wm.toplevels.get(i).appId === appId) services.wm.toplevels.remove(i);
             _syncRunning();
         }
-        function pin(appId) {
+        function pin(appId) { if (services._call("apps.pin", [appId])) return;
             const idx = _dockIndex(appId);
             if (idx >= 0) { dock.setProperty(idx, "pinned", true); return; }
             dock.append({ appId: appId, name: nameFor(appId), icon: iconFor(appId), pinned: true,
                           running: false, windows: 0, launching: false, attention: false });
         }
-        function unpin(appId) {
+        function unpin(appId) { if (services._call("apps.unpin", [appId])) return;
             const idx = _dockIndex(appId);
             if (idx < 0) return;
             if (!dock.get(idx).running) { dock.remove(idx); return; }
@@ -241,6 +328,9 @@ QtObject {
         //        icon (freedesktop name; symbolic Lucide name when kind != app),
         //        target (appId / winId / path / value to copy / command)
         property ListModel results: ListModel {}
+        // The query the `results` model currently belongs to (lets the UI tell
+        // "results for what I typed" from "still the previous query's").
+        property string resultsQuery: ""
         // Shown when the query is empty. roles: appId, name, icon
         property ListModel recent: ListModel {
             ListElement { appId: "firefox"; name: "Firefox"; icon: "firefox" }
@@ -253,9 +343,10 @@ QtObject {
         // slow providers (files, Store) in later.
         function search(text) {
             query = text;
+            if (services._call("launcher.search", [text])) return;   // answer: patch {query, results}
             results.clear();
             const q = text.trim().toLowerCase();
-            if (!q.length) return;
+            if (!q.length) { resultsQuery = text; return; }
             if (/^[=]?[\d\s.+\-*/^()%]+$/.test(q) && /\d/.test(q) && /[+\-*/^%]/.test(q)) {
                 let v = NaN;
                 try { v = Function('"use strict";return (' + q.replace(/^=/, "").replace(/\^/g, "**") + ")")(); } catch (e) {}
@@ -298,13 +389,14 @@ QtObject {
             if (q.startsWith(">"))
                 results.append({ kind: "command", group: qsTr("Run"), title: text.trim().slice(1).trim(),
                                  subtitle: qsTr("Run in Terminal"), icon: "terminal", target: text.trim().slice(1).trim() });
+            resultsQuery = text;
         }
         // Ctrl+Enter: open the file's location / the app's details.
-        function activateSecondary(index) {
+        function activateSecondary(index) { if (services._call("launcher.activateSecondary", [index])) return;
             const r = results.get(index);
             if (r) console.info("[mock] launcher secondary", r.kind, r.target);
         }
-        function activate(index) {
+        function activate(index) { if (services._call("launcher.activate", [index])) return;
             const r = results.get(index);
             if (!r) return;
             if (r.kind === "app") services.apps.activate(r.target);
@@ -316,6 +408,7 @@ QtObject {
     // ---- notifications (org.freedesktop.Notifications server) --------------
     property QtObject notifications: QtObject {
         property bool dnd: false
+        function setDnd(on) { dnd = on; services._call("notifications.setDnd", [on]); }
         // On-screen toasts, newest first, max 3 shown by the UI.
         // roles: nid (int), appName, appIcon, summary, body, urgency (0 low,
         //        1 normal, 2 critical), time (epoch ms), actions (JSON string of
@@ -334,6 +427,8 @@ QtObject {
         // actions: array of {key, label} or a JSON string (key "default" = click on
         // the body, not shown as a button); image: URL; appIcon: icon override.
         function notify(appName, summary, body, urgency, actions, image, appIcon) {
+            if (services._call("notifications.notify", [appName, summary, body || "", urgency === undefined ? 1 : urgency,
+                                                         actions || [], image || "", appIcon || ""])) return -1;
             const acts = actions === undefined ? "[]" : (typeof actions === "string" ? actions : JSON.stringify(actions));
             const n = { nid: _next++, appName: appName, appIcon: appIcon || services.apps.iconFor(appName.toLowerCase()), summary: summary,
                         body: body || "", urgency: urgency === undefined ? 1 : urgency, time: Date.now(), actions: acts, image: image || "" };
@@ -342,11 +437,11 @@ QtObject {
             return n.nid;
         }
         // Removes the toast only (it stays in history).
-        function expire(nid) { _removeFrom(popups, nid); }
+        function expire(nid) { if (services._call("notifications.expire", [nid])) return; _removeFrom(popups, nid); }
         // Removes from toasts and history.
-        function dismiss(nid) { _removeFrom(popups, nid); _removeFrom(history, nid); }
-        function clearAll() { popups.clear(); history.clear(); }
-        function invokeAction(nid, key) { actionInvoked(nid, key); dismiss(nid); }
+        function dismiss(nid) { if (services._call("notifications.dismiss", [nid])) return; _removeFrom(popups, nid); _removeFrom(history, nid); }
+        function clearAll() { if (services._call("notifications.clearAll", [])) return; popups.clear(); history.clear(); }
+        function invokeAction(nid, key) { if (services._call("notifications.invokeAction", [nid, key])) return; actionInvoked(nid, key); dismiss(nid); }
         function _removeFrom(model, nid) {
             for (let i = 0; i < model.count; ++i) if (model.get(i).nid === nid) { model.remove(i); return; }
         }
@@ -360,8 +455,8 @@ QtObject {
     // ---- trash (gio / XDG trash spec) -------------------------------------
     property QtObject trash: QtObject {
         property bool full: true
-        function open() { console.info("[mock] open trash"); }
-        function empty() { full = false; }
+        function open() { if (services._call("trash.open", [])) return; console.info("[mock] open trash"); }
+        function empty() { if (services._call("trash.empty", [])) return; full = false; }
     }
 
     // ---- network (NetworkManager) -----------------------------------------
@@ -383,15 +478,20 @@ QtObject {
             ListElement { ssid: "CafeNeo Guest"; strength: 41; secure: false; known: false; connected: false }
             ListElement { ssid: "MTN-Fiber-2F"; strength: 22; secure: true; known: false; connected: false }
         }
-        function setWifiEnabled(on) { wifiEnabled = on; connected = on && ssid !== ""; if (on) rescan(); }
-        function setAirplaneMode(on) { airplaneMode = on; if (on) setWifiEnabled(false); }
-        function rescan() { scanning = true; _scanTimer.restart(); }
+        function setWifiEnabled(on) { services._call("network.setWifiEnabled", [on]); wifiEnabled = on; connected = on && ssid !== ""; if (on) rescan(); }
+        // Airplane mode turns Wi-Fi and Bluetooth off (rfkill); leaving it restores them.
+        function setAirplaneMode(on) {
+            airplaneMode = on;
+            if (services._call("network.setAirplaneMode", [on])) return;
+            if (on) { setWifiEnabled(false); services.bluetooth.setEnabled(false); }
+        }
+        function rescan() { if (services._call("network.rescan", [])) return; scanning = true; _scanTimer.restart(); }
         // Async. On failure sets lastError = "Couldn't connect to <ssid>. Wrong password?"
-        function connectTo(ssid, password) {
+        function connectTo(ssid, password) { if (services._call("network.connectTo", [ssid, password])) return;
             lastError = ""; connectingSsid = ssid;
             _connectTimer.password = password || ""; _connectTimer.restart();
         }
-        function disconnect() {
+        function disconnect() { if (services._call("network.disconnect", [])) return;
             for (let i = 0; i < networks.count; ++i) networks.setProperty(i, "connected", false);
             connected = false; ssid = "";
         }
@@ -427,8 +527,8 @@ QtObject {
             ListElement { address: "AC:12:2F:00:11:03"; name: "Living room speaker"; icon: "speaker"; paired: true; connected: false; battery: -1; busy: false }
         }
         readonly property int connectedCount: { let n = 0; for (let i = 0; i < devices.count; ++i) if (devices.get(i).connected) ++n; return n; }
-        function setEnabled(on) { enabled = on; if (!on) for (let i = 0; i < devices.count; ++i) devices.setProperty(i, "connected", false); }
-        function toggleDevice(address) {
+        function setEnabled(on) { services._call("bluetooth.setEnabled", [on]); enabled = on; if (!on) for (let i = 0; i < devices.count; ++i) devices.setProperty(i, "connected", false); }
+        function toggleDevice(address) { if (services._call("bluetooth.toggleDevice", [address])) return;
             for (let i = 0; i < devices.count; ++i)
                 if (devices.get(i).address === address) {
                     devices.setProperty(i, "connected", !devices.get(i).connected);
@@ -449,10 +549,35 @@ QtObject {
             ListElement { devId: "bluez.buds"; name: "Keza's Buds"; icon: "headphones"; active: false }
             ListElement { devId: "hdmi.1"; name: "HDMI — LG UltraFine"; icon: "monitor"; active: false }
         }
-        function setVolume(v) { volume = Math.max(0, Math.min(1, v)); if (volume > 0) muted = false; }
-        function setMuted(m) { muted = m; }
-        function setMicMuted(m) { micMuted = m; }
-        function setOutput(devId) { for (let i = 0; i < outputs.count; ++i) outputs.setProperty(i, "active", outputs.get(i).devId === devId); }
+        // Inputs (microphones). roles: devId, name, icon (Lucide), active (bool)
+        property ListModel inputs: ListModel {
+            ListElement { devId: "alsa.mic"; name: "Built-in microphone"; icon: "mic"; active: true }
+            ListElement { devId: "bluez.buds.mic"; name: "Keza's Buds"; icon: "headphones"; active: false }
+        }
+        // Per-app playback streams. roles: streamId (int), name, icon (freedesktop
+        // app icon name), volume (0..1), muted (bool)
+        property ListModel streams: ListModel {
+            ListElement { streamId: 41; name: "Firefox"; icon: "firefox"; volume: 0.8; muted: false }
+            ListElement { streamId: 57; name: "VLC"; icon: "vlc"; volume: 1.0; muted: false }
+        }
+        function setMicVolume(v) { micVolume = Math.max(0, Math.min(1, v)); services._call("audio.setMicVolume", [micVolume]); }
+        function setInput(devId) {
+            if (services._call("audio.setInput", [devId])) return;
+            for (let i = 0; i < inputs.count; ++i) inputs.setProperty(i, "active", inputs.get(i).devId === devId);
+        }
+        function setStreamVolume(streamId, v) {
+            v = Math.max(0, Math.min(1, v));
+            for (let i = 0; i < streams.count; ++i) if (streams.get(i).streamId === streamId) streams.setProperty(i, "volume", v);
+            services._call("audio.setStreamVolume", [streamId, v]);
+        }
+        function setStreamMuted(streamId, m) {
+            for (let i = 0; i < streams.count; ++i) if (streams.get(i).streamId === streamId) streams.setProperty(i, "muted", m);
+            services._call("audio.setStreamMuted", [streamId, m]);
+        }
+        function setVolume(v) { services._call("audio.setVolume", [v]); volume = Math.max(0, Math.min(1, v)); if (volume > 0) muted = false; }
+        function setMuted(m) { services._call("audio.setMuted", [m]); muted = m; }
+        function setMicMuted(m) { services._call("audio.setMicMuted", [m]); micMuted = m; }
+        function setOutput(devId) { if (services._call("audio.setOutput", [devId])) return; for (let i = 0; i < outputs.count; ++i) outputs.setProperty(i, "active", outputs.get(i).devId === devId); }
     }
 
     // ---- display (logind SetBrightness) -----------------------------------
@@ -460,8 +585,11 @@ QtObject {
         property bool brightnessAvailable: true
         property real brightness: 0.7                  // 0..1
         property bool nightLight: false
-        function setBrightness(v) { brightness = Math.max(0.05, Math.min(1, v)); }
-        function setNightLight(on) { nightLight = on; }
+        property bool nightLightAvailable: true      // false ⇒ hide the toggle
+        // Re-read the brightness after an external change (brightness keys).
+        function refresh() { services._call("display.refresh", []); }
+        function setBrightness(v) { services._call("display.setBrightness", [v]); brightness = Math.max(0.05, Math.min(1, v)); }
+        function setNightLight(on) { services._call("display.setNightLight", [on]); nightLight = on; }
     }
 
     // ---- power (UPower + power-profiles-daemon) ---------------------------
@@ -471,7 +599,8 @@ QtObject {
         property bool charging: false
         property string timeRemaining: "3 h 40 min"   // "" when unknown
         property string profile: "balanced"            // power-saver | balanced | performance
-        function setProfile(p) { profile = p; }
+        property var profiles: ["power-saver", "balanced", "performance"]   // [] ⇒ hide the toggle
+        function setProfile(p) { services._call("power.setProfile", [p]); profile = p; }
     }
 
     // ---- media (MPRIS) ----------------------------------------------------
@@ -483,9 +612,9 @@ QtObject {
         property string artUrl: ""
         property bool playing: true
         property real position: 0.34                   // 0..1
-        function playPause() { playing = !playing; }
-        function next() { console.info("[mock] media next"); }
-        function previous() { console.info("[mock] media previous"); }
+        function playPause() { services._call("media.playPause", []); playing = !playing; }
+        function next() { if (services._call("media.next", [])) return; console.info("[mock] media next"); }
+        function previous() { if (services._call("media.previous", [])) return; console.info("[mock] media previous"); }
     }
 
     // ---- keyboard ---------------------------------------------------------
@@ -493,7 +622,8 @@ QtObject {
         property var layouts: ["us", "fr"]
         property string current: "us"
         property bool capsLock: false
-        function next() { const i = layouts.indexOf(current); current = layouts[(i + 1) % layouts.length]; }
+        function refresh() { services._call("keyboard.refresh", []); }
+        function next() { services._call("keyboard.next", []); const i = layouts.indexOf(current); current = layouts[(i + 1) % layouts.length]; }
     }
 
     // ---- appearance (lugh-settingsd; the mock writes Theme directly) -------
@@ -506,8 +636,16 @@ QtObject {
         // The preview/qml-check set it to the repo's branding/wallpapers/ when
         // lugh-branding isn't installed, so Wallpaper never probes a missing path.
         property string wallpaperDir: ""
-        function setDark(on) { Theme.dark = on; }
-        function setAccent(name) { Theme.accentName = name; }
+        property string iconTheme: "Papirus"
+        function setReduceMotion(on) { Theme.reduceMotion = on; services._call("appearance.setReduceMotion", [on]); }
+        function setTransparency(on) { Theme.transparency = on; services._call("appearance.setTransparency", [on]); }
+        function setWallpaper(light, dark) {
+            if (services._call("appearance.setWallpaper", [light, dark])) return;
+            wallpaperLight = light; wallpaperDark = dark;
+        }
+        function reload() { services._call("appearance.reload", []); }
+        function setDark(on) { services._call("appearance.setDark", [on]); Theme.dark = on; }
+        function setAccent(name) { services._call("appearance.setAccent", [name]); Theme.accentName = name; }
     }
 
     // ---- OSD requests (media keys → compositor bind → space.lugh.Shell1.ShowOSD)
@@ -516,5 +654,32 @@ QtObject {
         // value: 0..1 for sliders; for toggles 1 = on, 0 = off; ignored for layout.
         signal requested(string kind, real value)
         function show(kind, value) { requested(kind, value); }
+    }
+
+    // ---- shell D-Bus API (space.lugh.Shell1 → backend signals → here) -------
+    // The compositor's key binds call the D-Bus methods; the backend relays
+    // them as signals named like these functions.
+    property QtObject shell: QtObject {
+        // True on software rendering / power-saver: surfaces drop glass and
+        // long animations (the frame mirrors it into Theme.transparency).
+        property bool lowPower: false
+        // False when another lugh-shell already owns space.lugh.Shell1 (the host exits).
+        property bool primary: true
+        property string version: ""
+        function setLowPower(on) { lowPower = on; services._call("shell.setLowPower", [on]); }
+        function modeApplied(mode) { services._call("shell.modeApplied", [mode]); }
+        // space.lugh.Shell1.Lock() from a key bind or script.
+        function lockRequested() { services.session.lock(); }
+        // Set when ShowLauncher carries a query; the launcher reads and clears it.
+        property string pendingQuery: ""
+        function showLauncher(query) { pendingQuery = query || ""; ShellState.openLauncher(); }
+        function toggleLauncher() { ShellState.toggleLauncher(); }
+        function toggleControlCenter() { ShellState.toggleControlCenter(); }
+        function toggleNotificationCenter() { ShellState.toggleNotificationCenter(); }
+        function toggleLughMenu() { ShellState.toggleLughMenu(); }
+        function closeAll() { ShellState.closeAll(); }
+        // Tells the backend the first frame is on screen (prints the CI marker,
+        // emits space.lugh.Shell1.Ready).
+        function ready() { services._call("shell.ready", []); }
     }
 }
