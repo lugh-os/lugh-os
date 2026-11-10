@@ -7,7 +7,9 @@
 //
 // variant: ghost (no fill) | filled (surface2) | glass (shell glass, round) |
 // accent (accent fill). checked = selected: accent tint, accent icon and an
-// accent hairline (not color alone). badge > 0 shows a count (99+ caps).
+// accent hairline (not color alone); a checked `accent` button shows an inset
+// on-accent ring. badge > 0 shows a count (99+ caps; 9+ on sizes ≤ 32 so the
+// badge never covers the icon).
 import QtQuick
 import QtQuick.Templates as T
 
@@ -82,6 +84,19 @@ T.Button {
             border.color: control._sel ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
                                        : Theme.glassBorder
 
+            // checked accent: inset ring (the fill is already accent)
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 3
+                radius: Math.max(0, parent.radius - 3)
+                visible: control.checked && control.variant === "accent"
+                color: "transparent"
+                border.width: 2
+                border.color: Theme.onAccent
+                opacity: 0.75
+                antialiasing: true
+            }
+
             FocusRing { show: control.visualFocus }
         }
     }
@@ -102,7 +117,8 @@ T.Button {
 
     Badge {
         visible: control.badge > 0
-        text: control.badge > 99 ? "99+" : String(control.badge)
+        text: control.size <= 32 ? (control.badge > 9 ? "9+" : String(control.badge))
+            : control.badge > 99 ? "99+" : String(control.badge)
         tone: "danger"
         _outline: Theme.surface
         // top-right corner of the visual square, nudged out a little
