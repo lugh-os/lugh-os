@@ -1,0 +1,31 @@
+[{
+    "id": 2,
+    "name": "2",
+    "monitor": "eDP-1",
+    "monitorID": 0,
+    "windows": 1,
+    "hasfullscreen": false,
+    "lastwindow": "0x5a3e1d2c4c20",
+    "lastwindowtitle": "VLC media player",
+    "ispersistent": false
+},{
+    "id": 1,
+    "name": "1",
+    "monitor": "eDP-1",
+    "monitorID": 0,
+    "windows": 2,
+    "hasfullscreen": true,
+    "lastwindow": "0x5a3e1d2c4a00",
+    "lastwindowtitle": "Lugh — Mozilla Firefox",
+    "ispersistent": false
+},{
+    "id": 5,
+    "name": "music, loud",
+    "monitor": "HDMI-A-1",
+    "monitorID": 1,
+    "windows": 0,
+    "hasfullscreen": false,
+    "lastwindow": "0x0",
+    "lastwindowtitle": "",
+    "ispersistent": true
+}]
