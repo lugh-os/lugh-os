@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Deserializer};
 
-use crate::wm::{Monitor, Toplevel, WindowId, Workspace, WorkspaceId};
+use crate::wm::{Monitor, Rect, Toplevel, WindowId, Workspace, WorkspaceId};
 
 #[derive(Debug, Default, Deserialize)]
 pub(super) struct WsRef {
@@ -32,6 +32,10 @@ pub(super) struct Client {
     title: String,
     #[serde(default)]
     initial_class: String,
+    #[serde(default)]
+    at: Option<(i32, i32)>,
+    #[serde(default)]
+    size: Option<(i32, i32)>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +73,8 @@ pub(super) struct MonitorJson {
     focused: bool,
     #[serde(default)]
     disabled: bool,
+    #[serde(default)]
+    transform: u8,
 }
 
 fn yes() -> bool {
@@ -117,6 +123,10 @@ impl Client {
             pid: u32::try_from(self.pid).ok().filter(|&p| p > 0),
             focused: false,
             urgent: false,
+            geometry: match (self.at, self.size) {
+                (Some((x, y)), Some((w, h))) => Some(Rect { x, y, w, h }),
+                _ => None,
+            },
         })
     }
 }
@@ -152,6 +162,7 @@ impl MonitorJson {
             x: self.x,
             y: self.y,
             scale: self.scale,
+            transform: self.transform,
             active_workspace: WorkspaceId(self.active_workspace.id.unwrap_or_default()),
             focused: self.focused,
         })
@@ -178,6 +189,15 @@ mod tests {
         assert_eq!(t[0].app_id, "firefox");
         assert_eq!(t[0].pid, Some(2731));
         assert!(t[0].floating && !t[0].fullscreen);
+        assert_eq!(
+            t[0].geometry,
+            Some(Rect {
+                x: 26,
+                y: 52,
+                w: 1868,
+                h: 1002
+            })
+        );
         assert!(t[1].fullscreen && !t[1].floating);
         assert_eq!(t[2].app_id, "vlc", "falls back to initialClass");
         assert_eq!(t[2].workspace, WorkspaceId(2));
