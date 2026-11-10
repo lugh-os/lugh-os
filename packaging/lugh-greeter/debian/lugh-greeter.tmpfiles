@@ -1,0 +1,4 @@
+# Failure counter of /usr/libexec/lugh/greeter-session (cleared at boot).
+d /run/lugh-greeter 0755 _greetd _greetd -
+# Greeter state: last user, last session, wallpaper copies.
+d /var/lib/lugh-greeter 0750 _greetd _greetd -
