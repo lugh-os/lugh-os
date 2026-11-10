@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+# The binary is built from the repo checkout (LUGH_REPO_ROOT, exported by
+# scripts/build-debs.sh) with the commands of scripts/build-greeter.sh, reusing its
+# cargo target dir; an up-to-date out/bin/lugh-greeter is reused as is. See
+# scripts/build-env/cargo-deb-build.sh and docs/dev/packaging.md.
+
+LUGH_REPO_ROOT ?= /src
+
+%:
+	dh $@ --with config-package
+
+override_dh_auto_build:
+	$(LUGH_REPO_ROOT)/scripts/build-env/cargo-deb-build.sh \
+	  lugh-greeter ui/greeter/Cargo.toml out/greeter-target build/lugh-greeter
+
+override_dh_auto_clean:
+	rm -rf build
+
+# Displaced with config-package-dev (debian/lugh-greeter.displace): installed
+# under its ".lugh" name; dh_install cannot rename.
+execute_after_dh_install:
+	install -D -m 0644 debian/config.toml debian/lugh-greeter/etc/greetd/config.toml.lugh
+
+# cargo already stripped what the release profile asks for; no -dbgsym.
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
