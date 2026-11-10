@@ -59,7 +59,7 @@ Item {
             visible: text !== ""
             text: root.title
             font: Theme.typeTitle3
-            lineHeight: Theme.lineHeading
+            lineHeight: lineCount > 1 ? Theme.lineHeading : 1
             color: Theme.text
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
@@ -74,7 +74,7 @@ Item {
             visible: text !== ""
             text: root.body
             font: Theme.typeBody
-            lineHeight: Theme.lineBody
+            lineHeight: lineCount > 1 ? Theme.lineBody : 1
             color: Theme.textMuted
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
