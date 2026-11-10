@@ -1,16 +1,20 @@
 # lugh-greeter
 
 The Lugh sign-in screen: a QML app that greetd runs inside the `cage` kiosk
-compositor (shell spec §Greeter, phase-1 §5). It shares the lock screen's look
-(blurred wallpaper, light clock, avatar and password field, glass status pill)
-so signing in and unlocking feel like one product.
+compositor (shell spec §Greeter, phase-1 §5). It is drawn in the liquid
+language of the lock screen (docs/design/lugh-mode.md §3): the blurred
+wallpaper, the clock as the hero, the password in a floating glass capsule and
+small glass capsules in the bottom corners, so signing in and unlocking feel
+like one product.
 
 ```
 ui/greeter/qml/
   main.qml         Window (full screen) hosting Greeter; picks the real backend or the mock
   Greeter.qml      the UI (an Item; loadable on its own with its own MockGreetd)
   MockGreetd.qml   the backend contract, mocked (password "lugh" works)
+  AuthCapsule.qml  the glass password capsule (copy of the lock screen's; keep identical)
   Avatar.qml       round user picture / initials (copy of the lock screen's)
+  backend/         GreetdBackend.qml, the adapter over the Rust host's object
   GreeterDemo.qml  demo with flags, for screenshots
 ```
 
@@ -26,8 +30,31 @@ QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh ui/greeter/qml/GreeterDemo.qml \
 ```
 
 Demo flags: `--dark`, `--error`, `--busy`, `--caps`, `--many` (14 users, so the
-username field shows), `--sessions` (two sessions, so the session picker shows),
-`--reduce`, `--a11y` (accessibility menu open), `--confirm` (shut-down dialog).
+username capsule shows), `--hide` (`hide_users`), `--sessions` (two sessions, so
+the session picker shows), `--prompt` (a second prompt: one-time code, answer
+`123456`), `--info` (a PAM info line with the prompt), `--slow` (PAM takes 2 s),
+`--typed`, `--reduce`, `--a11y` (accessibility menu open), `--confirm`
+(shut-down dialog).
+
+Motion capture: `--motion <error-shake|unlock|user-switch> --frames <dir>` saves
+a scene grab every 33 ms to `<dir>/<kind>-NN.png` (give `qml-shot.sh` a delay of
+4000); `montage <dir>/<kind>-*.png -tile 6x4 sheet.png` makes the contact sheet.
+
+## States
+
+| State | What shows |
+|---|---|
+| Idle | clock and date; user row (selected avatar large, centered, named); password capsule focused; logo + host name bottom left; keyboard layout, accessibility and power capsules bottom right (session capsule only with more than one session) |
+| User switch | Left/Right, Home/End or a click: the row glides on the liquid spring; an open greetd session is cancelled, the field and messages clear |
+| Username mode | more than 10 users, none, or `hideUsers`: a username capsule above the password one; Enter in it moves to the password |
+| Waiting | from submit until greetd answers (PAM may take seconds): spinner in the submit button, field read-only, user switching off |
+| Further prompt | a prompt that arrives when no typed password is waiting (one-time code…): its text becomes the placeholder and accessible label, masked only if `secret`; an empty answer is allowed |
+| Info | `infoMessage` text in a small capsule under the field |
+| Error | `authFailed`: capsule shakes (not under reduce motion), field clears and refocuses, the message shows verbatim under the field; Caps Lock warning shares that capsule |
+| Signed in | `authSucceeded`: the capsule contracts into a dot, the scene fades, `startSession(exec)` is called and "Starting <session>…" stays until greetd ends the process; `errorOccurred` brings the form back |
+
+Nothing animates while the screen rests; the clock repaints once a minute.
+Under reduce motion every movement becomes a short fade or an instant change.
 
 Keyboard: Left/Right switch users when the password field is empty, or at any
 time when the user row has focus (it's a Tab stop; Home/End too). Enter submits
@@ -120,7 +147,7 @@ submit ──► createSession(user) ──► promptRequested(secret) ──►
                                            │              ┌─────────┴──────────┐
                                            ▼              ▼                    ▼
                                 (another prompt:     authSucceeded()      authFailed(msg)
-                                 the field asks       content fades,       field shakes,
+                                 the field asks       capsule → dot,       capsule shakes,
                                  for it, e.g. OTP)    startSession(exec)   clears, refocuses
 ```
 
