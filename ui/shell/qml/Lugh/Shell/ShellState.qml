@@ -14,7 +14,7 @@ QtObject {
     property bool lughMenuOpen: false
     // "lugh" only in Phase 1; Classic/Focus arrive in Phase 2.
     property string mode: "lugh"
-    // Sub-page the control center opens on ("" = main): "wifi" | "bluetooth" | "sound".
+    // Sub-page the control center opens on ("" = main): "wifi" | "bluetooth" | "sound" | "power".
     property string controlCenterPage: ""
 
     // Island geometry in screen coordinates, published by the Bar so overlays
