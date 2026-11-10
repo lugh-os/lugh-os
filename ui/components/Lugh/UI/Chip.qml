@@ -18,7 +18,9 @@ T.Button {
     property string size: "md"
 
     readonly property bool _lead: selected || iconName !== ""
-    readonly property color _fg: selected ? Theme.accentText : Theme.text
+    // The label stays Theme.text when selected: accentText on the selected tint
+    // over glass drops below AA. Selection shows through the tint, border and check.
+    readonly property color _fg: Theme.text
 
     implicitWidth: implicitContentWidth + leftPadding + rightPadding
     implicitHeight: Theme.hitTarget
