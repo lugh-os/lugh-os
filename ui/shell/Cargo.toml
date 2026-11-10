@@ -1,0 +1,49 @@
+[package]
+name = "lugh-shell"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+description = "The Lugh desktop shell: Qt 6 / QML host (cxx-qt) around the Qt-free lugh-shell-core."
+
+# Standalone project: it needs Qt 6 dev packages, so it stays out of the root
+# workspace (like ui/hello). Build it with scripts/build-shell.sh.
+[workspace]
+
+[features]
+# Compile Lugh.UI, Lugh.Shell and main.qml into the binary (qmlcachegen
+# bytecode + Qt resources) instead of loading them from /usr/share/lugh/qml.
+# Off by default: see ui/shell/src/main.rs for the measurements.
+embed-qml = []
+
+[dependencies]
+lugh-common = { path = "../../crates/lugh-common" }
+# `pam`: real authentication for the lock screen (links libpam).
+lugh-shell-core = { path = "../../crates/lugh-shell-core", features = ["pam"] }
+cxx = "1.0"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+serde_json = "1"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+tracing = "0.1"
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+[lints.rust]
+# cxx-qt's bridge macro expands to unsafe code; it is confined to src/bridge.rs.
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
