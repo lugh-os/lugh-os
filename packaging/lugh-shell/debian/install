@@ -1,0 +1,8 @@
+build/lugh-shell usr/bin/
+ui/shell/qml/main.qml usr/share/lugh/qml/
+ui/shell/qml/Lugh/Shell usr/share/lugh/qml/Lugh/
+ui/shell/session/systemd/lugh-session.target usr/lib/systemd/user/
+ui/shell/session/systemd/lugh-shell.service usr/lib/systemd/user/
+ui/shell/session/space.lugh.Shell1.service usr/share/dbus-1/services/
+crates/lugh-shell-core/data/aliases.toml usr/share/lugh/launcher/
+crates/lugh-shell-core/data/pam/lugh-lock etc/pam.d/
