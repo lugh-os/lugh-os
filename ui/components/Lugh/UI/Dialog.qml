@@ -88,7 +88,7 @@ T.Dialog {
                 visible: text !== ""
                 text: control.title
                 font: Theme.typeTitle3
-                lineHeight: Theme.lineHeading
+                lineHeight: lineCount > 1 ? Theme.lineHeading : 1
                 color: Theme.text
                 wrapMode: Text.Wrap
                 Accessible.role: Accessible.Heading
@@ -101,7 +101,7 @@ T.Dialog {
                 visible: text !== ""
                 text: control.text
                 font: Theme.typeBody
-                lineHeight: Theme.lineBody
+                lineHeight: lineCount > 1 ? Theme.lineBody : 1
                 color: Theme.textMuted
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
@@ -112,12 +112,14 @@ T.Dialog {
             Item {
                 id: extraArea
                 Layout.fillWidth: true
-                Layout.topMargin: Theme.space16
-                visible: children.length > 0
+                // Hidden children take no room: no height and no margin (the
+                // area itself stays visible so children can report `visible`).
+                Layout.topMargin: implicitHeight > 0 ? Theme.space16 : 0
                 implicitHeight: {
                     let h = 0;
                     for (let i = 0; i < children.length; ++i)
-                        h = Math.max(h, children[i].implicitHeight);
+                        if (children[i].visible)
+                            h = Math.max(h, children[i].implicitHeight);
                     return h;
                 }
             }
@@ -140,7 +142,7 @@ T.Dialog {
                     Layout.fillWidth: true
                     text: control.errorText
                     font: Theme.typeBody
-                    lineHeight: Theme.lineBody
+                    lineHeight: lineCount > 1 ? Theme.lineBody : 1
                     color: Theme.danger
                     wrapMode: Text.Wrap
                     textFormat: Text.PlainText
