@@ -1,0 +1,10 @@
+# greetd configuration of Lugh OS (package lugh-greeter). Debian's file is
+# kept next to this one as config.toml.lugh-orig.
+[terminal]
+vt = 7
+
+[default_session]
+# Wrapper: sets the environment (greetd passes none), runs
+# `cage -s -- lugh-greeter`, and falls back to tuigreet after 3 failures.
+command = "/usr/libexec/lugh/greeter-session"
+user = "_greetd"
