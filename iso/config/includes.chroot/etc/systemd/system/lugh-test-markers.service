@@ -1,0 +1,10 @@
+# Test VMs only: copy the LUGH-MARK lines of the journal (shell first frame,
+# greeter shown, ...) to the serial console, where the host harness reads them.
+[Unit]
+Description=Lugh test markers on the serial console (test VMs only)
+ConditionPathExists=/dev/ttyS0
+
+[Service]
+ExecStart=/bin/sh -c 'exec journalctl --follow --lines=all --boot --output=cat --grep="LUGH-MARK" > /dev/ttyS0'
+Restart=always
+RestartSec=1
