@@ -407,9 +407,16 @@ FocusScope {
                 Keys.onPressed: event => root._tileKey(event, index)
             }
 
+            // The pill opens first (its width springs), then the icon grows in.
             add: Transition {
-                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur(Theme.durMedium) }
-                Liquid { property: "scale"; from: Theme.reduceMotion ? 1 : 0.5; to: 1; epsilon: 0.002 }
+                SequentialAnimation {
+                    PropertyAction { property: "opacity"; value: 0 }
+                    PauseAnimation { duration: Theme.reduceMotion ? 0 : 110 }
+                    ParallelAnimation {
+                        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.dur(Theme.durSmall) }
+                        Liquid { property: "scale"; from: Theme.reduceMotion ? 1 : 0.5; to: 1; epsilon: 0.002 }
+                    }
+                }
             }
             remove: Transition {
                 NumberAnimation { property: "opacity"; to: 0; duration: Theme.dur(Theme.durSmall) }
