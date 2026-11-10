@@ -45,6 +45,9 @@ Item {
         : noResults.implicitHeight
     function _latch() {
         if (mode === "pending") return;
+        // Rows left from an earlier query may replace each other, but never
+        // come up over the empty state or the no-results message.
+        if (mode === "results" && !current && view !== "results") return;
         if (mode === "none") _noneQuery = trimmed;
         view = mode;
         targetHeight = _viewHeight;
