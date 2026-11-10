@@ -1,5 +1,7 @@
-# Toolchain smoke-test image for `make hello`: Debian trixie + Qt 6 dev
-# packages + rustup. Mirrors the `hello` job in .github/workflows/ci.yml.
+# Qt build image for `make hello` and `scripts/build-shell.sh` (lugh-shell):
+# Debian trixie + Qt 6 dev packages + rustup, plus what the shell needs to be
+# built and smoke-tested in place (its QML modules, layer-shell-qt, a headless
+# wlroots compositor). Mirrors the `hello` job in .github/workflows/ci.yml.
 # The Rust toolchain itself is installed at run time from rust-toolchain.toml
 # (`rustup toolchain install`) into a named volume, so a toolchain bump does
 # not need an image rebuild.
@@ -17,6 +19,14 @@ RUN apt-get update \
       qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-window \
       qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
       curl ca-certificates git \
+ && apt-get install -y --no-install-recommends \
+      libpam0g-dev \
+      qml6-module-qtqml qml6-module-qtqml-models \
+      qml6-module-qtquick-shapes qml6-module-qtquick-layouts \
+      layer-shell-qt qml6-module-org-kde-layershell \
+      qt6-svg-plugins qt6-wayland fonts-inter \
+      dbus-daemon dbus-bin time procps \
+      labwc grim libgl1-mesa-dri libegl1 \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
