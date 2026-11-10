@@ -14,6 +14,11 @@ T.AbstractButton {
     property bool busy: false
     property string trailingIcon: ""
     property bool danger: false
+    // Keyboard-current row of a list (the list holds the focus).
+    property bool current: false
+    // Staggered entrance: plays when `entering` turns true, `order` rows late.
+    property bool entering: false
+    property int order: 0
 
     readonly property color _fg: danger ? Theme.danger : selected ? Theme.accentText : Theme.text
 
@@ -22,6 +27,25 @@ T.AbstractButton {
     focusPolicy: Qt.StrongFocus
     hoverEnabled: true
     opacity: enabled ? 1 : Theme.disabledOpacity
+
+    onEnteringChanged: if (entering) enter.restart()
+
+    SequentialAnimation {
+        id: enter
+        PropertyAction { target: body; property: "opacity"; value: 0 }
+        PauseAnimation { duration: Math.min(control.order, 6) * 30 }
+        ParallelAnimation {
+            NumberAnimation {
+                target: body; property: "opacity"; to: 1
+                duration: Theme.dur(Theme.durSmall)
+            }
+            NumberAnimation {
+                target: shift; property: "y"; from: Theme.reduceMotion ? 0 : 6; to: 0
+                duration: Theme.dur(Theme.durSmall)
+                easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+            }
+        }
+    }
 
     Keys.onReturnPressed: clicked()
     Keys.onEnterPressed: clicked()
@@ -36,10 +60,13 @@ T.AbstractButton {
              : control.down ? Theme.pressedOverlay
              : control.hovered ? Theme.hoverOverlay : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.durMicro } }
-        FocusRing { show: control.visualFocus }
+        FocusRing { show: control.visualFocus || control.current }
     }
 
     contentItem: Item {
+        id: body
+        transform: Translate { id: shift }
+
         Icon {
             id: lead
             x: 10
