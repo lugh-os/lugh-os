@@ -94,16 +94,16 @@ hl.layer_rule({
     no_anim = true,
 })
 
--- Off by default: if the shell prefers to own all motion of its surfaces
--- (QML fades), enable this from user.lua or the mode preset with
--- lugh.rules.shell_noanim:set_enabled(true).
+-- The shell owns the motion of its pop-up surfaces: they grow out of an island
+-- with QML's liquid motion (docs/design/lugh-mode.md) and unmap when their own
+-- exit has finished. A compositor fade on top would only double it. Turn it
+-- back on from user.lua with lugh.rules.shell_noanim:set_enabled(false).
 lugh.rules = lugh.rules or {}
 lugh.rules.shell_noanim = hl.layer_rule({
     name    = "lugh-shell-noanim",
-    match   = { namespace = "^lugh-(launcher|controlcenter|notifications|notification-center|menu|osd)$" },
+    match   = { namespace = "^lugh-(bar|dock|launcher|controlcenter|notifications|notification-center|menu|osd)$" },
     no_anim = true,
 })
-lugh.rules.shell_noanim:set_enabled(false)
 
 ---------------------------------------------------------------------------
 -- Workspaces
