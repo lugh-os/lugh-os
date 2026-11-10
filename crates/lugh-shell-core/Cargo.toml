@@ -17,6 +17,18 @@ toml.workspace = true
 tracing.workspace = true
 zbus = { workspace = true, features = ["blocking-api"] }
 nucleo-matcher = "0.3"
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros", "process", "io-util", "net", "fs"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+zeroize = "1"
+# PAM binding for the lock screen (safe API, no bindgen). Links -lpam, which
+# needs libpam0g-dev at build time, so it is opt-in: production builds
+# (ui/shell, packaging) enable `pam`; without it the session service falls
+# back to the setgid unix_chkpwd helper.
+nonstick = { version = "0.1.2", optional = true }
+
+[features]
+default = []
+pam = ["dep:nonstick"]
 
 [dev-dependencies]
 tempfile.workspace = true
