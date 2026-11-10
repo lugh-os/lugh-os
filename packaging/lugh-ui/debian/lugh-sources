@@ -1,0 +1,4 @@
+# Repo paths copied into the build tree (scripts/build-debs.sh).
+ui/components/Lugh
+ui/components/fonts
+ui/components/LICENSES
