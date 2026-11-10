@@ -17,7 +17,20 @@ fn main() {
         .cpp_file("cpp/host.cpp");
     println!("cargo::rerun-if-changed=cpp/host.h");
 
-    if std::env::var_os("CARGO_FEATURE_EMBED_QML").is_some() {
+    // host.cpp calls lugh_embedded_qml_init() at start-up. That reference is
+    // what keeps the resource objects in the link (objects of a static
+    // library that nothing refers to are dropped, static initialisers and all).
+    let embed = std::env::var_os("CARGO_FEATURE_EMBED_QML").is_some();
+    let init = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("lugh_embed_init.cpp");
+    let body = if embed {
+        "int qInitResources_lugh_qml();\nint qInitResources_qmlcache_lugh_qml();\n\
+         void lugh_embedded_qml_init() { qInitResources_lugh_qml(); qInitResources_qmlcache_lugh_qml(); }\n"
+    } else {
+        "void lugh_embedded_qml_init() {}\n"
+    };
+    std::fs::write(&init, body).unwrap_or_else(|e| panic!("build: {e}"));
+    builder = builder.cpp_file(init);
+    if embed {
         for generated in embed_qml() {
             builder = builder.cpp_file(generated);
         }
@@ -89,30 +102,36 @@ fn embed_qml() -> Vec<PathBuf> {
     let (qmlcachegen, rcc) = (tool("qmlcachegen"), tool("rcc"));
 
     let mut generated = Vec::new();
+    let mut compiled = Vec::new(); // resource paths of the compiled units
     for (i, (alias, path)) in files.iter().enumerate() {
         if !(alias.ends_with(".qml") || alias.ends_with(".js") || alias.ends_with(".mjs")) {
             continue;
         }
         let cpp = out.join(format!("unit_{i}.cpp"));
-        // --bare: bytecode only (no C++ type compilation, which would need
-        // Qt's private headers and every imported module's type info).
+        // Bytecode only: no C++ type compilation, which would need Qt's
+        // private headers and every imported module's type info.
         run(Command::new(&qmlcachegen)
             .arg("--bare")
+            .arg("--only-bytecode")
             .arg("--resource-path")
             .arg(format!("/lugh/qml/{alias}"))
             .arg("-o")
             .arg(&cpp)
             .arg(path));
         generated.push(cpp);
+        compiled.push(format!("/lugh/qml/{alias}"));
     }
-    let loader = out.join("lugh_qml_loader.cpp");
+    // qmlcachegen recognises the loader by this file-name suffix.
+    let loader = out.join("lugh_qmlcache_loader.cpp");
+    // The loader takes the compiled resource paths as a response file.
+    let list = out.join("lugh_qml_loader.rsp");
+    std::fs::write(&list, compiled.join("\n")).unwrap_or_else(|e| panic!("embed-qml: {e}"));
     run(Command::new(&qmlcachegen)
         .arg("--resource-name")
-        .arg("lugh_qml")
-        .arg("--resource")
-        .arg(&qrc_path)
+        .arg("qmlcache_lugh_qml")
         .arg("-o")
-        .arg(&loader));
+        .arg(&loader)
+        .arg(format!("@{}", list.display())));
     generated.push(loader);
     let resources = out.join("lugh_qml_rcc.cpp");
     run(Command::new(&rcc)
