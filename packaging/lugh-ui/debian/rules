@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+# Nothing is compiled: the QML tree listed in debian/lugh-sources is copied
+# into the build tree by scripts/build-debs.sh and installed by debian/install.
+
+%:
+	dh $@
+
+# Generators of committed files are not runtime files.
+override_dh_install:
+	dh_install -X.py
