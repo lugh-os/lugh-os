@@ -111,6 +111,9 @@ QtObject {
     // Live numbers (clocks, meters): same as body/caption with tabular figures.
     readonly property font typeBodyTnum:    Qt.font({ family: fontUi, pixelSize: 14, weight: 500, features: { "tnum": 1 } })
     readonly property font typeCaptionTnum: Qt.font({ family: fontUi, pixelSize: 12, weight: 450, features: { "tnum": 1 } })
+    // Island / compact UI text (docs/design/lugh-mode.md).
+    readonly property font typeLabel:      Qt.font({ family: fontUi, pixelSize: 13, weight: 500 })
+    readonly property font typeLabelTnum:  Qt.font({ family: fontUi, pixelSize: 13, weight: 500, features: { "tnum": 1 } })
     readonly property real lineBody: 1.45
     readonly property real lineHeading: 1.2
 
@@ -153,4 +156,22 @@ QtObject {
     readonly property real springSpring: 6.0
     readonly property real springDamping: 0.42
     readonly property real springEpsilon: 0.25
+
+    // ---- liquid motion (docs/design/lugh-mode.md §2) ----------------------
+    // SpringAnimation presets. liquid: morphs, reflow, magnify (soft, a hint
+    // of overshoot). snappy: toggles, squish release, small state changes.
+    //   SpringAnimation { spring: Theme.liquidSpring; damping: Theme.liquidDamping; mass: Theme.liquidMass; epsilon: Theme.springEpsilon }
+    readonly property real liquidSpring: 3.2
+    readonly property real liquidDamping: 0.34
+    readonly property real liquidMass: 1.0
+    readonly property real snappySpring: 5.5
+    readonly property real snappyDamping: 0.46
+    readonly property real snappyMass: 0.8
+    readonly property real squishScale: 0.96
+    // Island geometry.
+    readonly property int islandHeight: 36
+    readonly property int islandMargin: 8      // from the screen edge (top)
+    readonly property int islandSideMargin: 10 // from the left/right edges
+    readonly property int barHeight: 52        // bar surface height (islandMargin + islandHeight + 8)
+    readonly property int barExclusiveZone: 48
 }
