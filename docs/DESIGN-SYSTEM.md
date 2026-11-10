@@ -44,7 +44,7 @@ Default theme: **Light** (ADR-010). All text pairs meet WCAG AA, with measured r
 | `accent` | `#F2A93B` | fills and accent text (9.2:1) |
 | `on-accent` | `#141413` | (9.2:1) |
 | `accent-text` | `#F2A93B` | |
-| `shell-glass` | `rgba(28,27,25,0.70)` + 30 px blur | |
+| `shell-glass` | `rgba(28,27,25,0.82)` + 30 px blur | (0.82 keeps `text-muted` AA over the brightest part of the Dusk wallpaper) |
 
 ### 2.3 Semantic
 | Token | Light | Dark | Notes |
@@ -55,7 +55,7 @@ Default theme: **Light** (ADR-010). All text pairs meet WCAG AA, with measured r
 | `warning` | `#8A6100` (text) / `#F5C04A` (fill) | `#F5C04A` | used rarely, since it sits close to the accent; always has an icon |
 | `quarantine` | `danger` + 45° stripes + shield icon | same | never conveyed by color alone |
 
-The user-selectable accent offers Amber (default), plus Teal `#0F8B8D`, Green `#2F8F4E`, Blue `#2F6FDB`, Red `#D0453A` and Graphite `#5F5B54`. Each has a computed `accent-text` and `on-accent` that pass AA. No purples (house rule).
+The user-selectable accent offers Amber (default), plus Teal `#0F8B8D`, Green `#2F8F4E`, Blue `#2F6FDB`, Red `#D0453A` and Graphite `#5F5B54`. Each has a computed `accent-text` and `on-accent` that pass AA, including `accent-text` on the 16% selected background; the exact values live in `ui/components/Lugh/UI/Theme.qml` and are verified by `scripts/check-contrast.py`. No purples (house rule).
 
 ## 3. Typography
 
@@ -104,7 +104,7 @@ Tabular numerals (`tnum`) are used in Tasks, clocks and anywhere numbers update 
 |---|---|
 | hover | `surface-2` background or +4% overlay, 120 ms |
 | pressed | `surface-3`, scale 0.98 for buttons |
-| focus (keyboard) | 2 px `accent` ring with a 2 px offset; never removed |
+| focus (keyboard) | 2 px ring with a 2 px offset; never removed. Dark: `accent`. Light: `accent-text`, because the light amber fill is only 2.2:1 on `bg` (non-text needs 3:1) |
 | selected | `accent` at 16% background + `accent-text` label, plus a check or indicator |
 | disabled | 40% opacity, no hover, `cursor: default`, with a tooltip explaining why |
 | loading | skeleton shimmer for content (≤ 1.2 s loop), spinner only for actions |
