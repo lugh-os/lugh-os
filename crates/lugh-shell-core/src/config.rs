@@ -10,6 +10,8 @@
 //! theme = "light"                       # light | dark | auto
 //! accent = "amber"                      # amber | teal | green | blue | red | graphite
 //! wallpaper = "lugh://wallpapers/dawn"  # or a file/folder path
+//! wallpaper_dark = ""                   # dark-theme wallpaper; "" = same rule as `wallpaper`
+//! icon_theme = "Papirus"                # freedesktop icon theme name
 //! transparency = true
 //! reduce_motion = false                 # also see accessibility.reduce_motion
 //!
@@ -158,6 +160,37 @@ pub enum Accent {
     Graphite,
 }
 
+impl Accent {
+    /// The six presets, in display order.
+    pub const ALL: [Self; 6] = [
+        Self::Amber,
+        Self::Teal,
+        Self::Green,
+        Self::Blue,
+        Self::Red,
+        Self::Graphite,
+    ];
+
+    /// The name used in `desktop.toml` and by the QML theme (`"amber"`).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Amber => "amber",
+            Self::Teal => "teal",
+            Self::Green => "green",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Graphite => "graphite",
+        }
+    }
+
+    /// The preset called `name`, if it is one of the six.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.name() == name)
+    }
+}
+
 /// Desktop mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -206,6 +239,11 @@ pub struct Appearance {
     pub accent: Accent,
     /// `lugh://wallpapers/<name>`, or a file or folder path.
     pub wallpaper: String,
+    /// Wallpaper for the dark theme, same forms; `""` (default) means the
+    /// bundled dark art.
+    pub wallpaper_dark: String,
+    /// Freedesktop icon theme name (`Papirus`).
+    pub icon_theme: String,
     /// Glass surfaces (`true`).
     pub transparency: bool,
     /// Reduce animations (`false`); `accessibility.reduce_motion` wins when
@@ -219,6 +257,8 @@ impl Default for Appearance {
             theme: Theme::default(),
             accent: Accent::default(),
             wallpaper: "lugh://wallpapers/dawn".into(),
+            wallpaper_dark: String::new(),
+            icon_theme: "Papirus".into(),
             transparency: true,
             reduce_motion: false,
         }
@@ -496,6 +536,8 @@ impl DesktopConfig {
             theme: s.value("theme", d.appearance.theme),
             accent: s.value("accent", d.appearance.accent),
             wallpaper: s.value("wallpaper", d.appearance.wallpaper),
+            wallpaper_dark: s.value("wallpaper_dark", d.appearance.wallpaper_dark),
+            icon_theme: s.value("icon_theme", d.appearance.icon_theme),
             transparency: s.value("transparency", d.appearance.transparency),
             reduce_motion: s.value("reduce_motion", d.appearance.reduce_motion),
         };
@@ -1217,6 +1259,25 @@ per_app = { "org.telegram.desktop" = { banners = false, sound = "quiet" }, "old.
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert_eq!(names.len(), 2, "{names:?}");
+    }
+
+    #[test]
+    fn appearance_additions_default_and_round_trip() {
+        let (c, w) = parse("[appearance]\ntheme = \"dark\"\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.appearance.icon_theme, "Papirus");
+        assert_eq!(c.appearance.wallpaper_dark, "");
+        let (c, _) =
+            parse("[appearance]\nicon_theme = \"Adwaita\"\nwallpaper_dark = \"/a b.jpg\"\n");
+        let text = c.to_toml_string().unwrap_or_default();
+        let (again, w) = parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(again.appearance.icon_theme, "Adwaita");
+        assert_eq!(again.appearance.wallpaper_dark, "/a b.jpg");
+        for a in Accent::ALL {
+            assert_eq!(Accent::from_name(a.name()), Some(a));
+        }
+        assert_eq!(Accent::from_name("purple"), None);
     }
 
     #[test]
