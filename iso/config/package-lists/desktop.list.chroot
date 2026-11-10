@@ -1,0 +1,14 @@
+# Around the Lugh desktop (lugh-desktop-minimal pulls the session, shell,
+# greeter, Hyprland from trixie-backports, Firefox, foot, Files, VLC).
+libgl1-mesa-dri
+libegl-mesa0
+libgles2
+xwayland
+bluez
+power-profiles-daemon
+upower
+hyprsunset
+libnotify-bin
+libglib2.0-bin
+xdg-user-dirs
+sysstat
