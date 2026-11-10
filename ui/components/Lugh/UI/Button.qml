@@ -91,7 +91,8 @@ T.Button {
     }
 
     contentItem: Item {
-        implicitWidth: row.implicitWidth
+        id: body
+        implicitWidth: (iconSlot.visible ? iconSlot.width + control.spacing : 0) + label.implicitWidth
         implicitHeight: row.implicitHeight
 
         Row {
@@ -126,6 +127,10 @@ T.Button {
             }
 
             Text {
+                id: label
+                // never wider than the button: long labels elide
+                width: Math.min(implicitWidth, Math.max(0, body.width
+                    - (iconSlot.visible ? iconSlot.width + control.spacing : 0)))
                 text: control.text
                 font: control.font
                 color: control._fg
