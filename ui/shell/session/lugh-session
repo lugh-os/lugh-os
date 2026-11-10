@@ -1,0 +1,175 @@
+#!/bin/sh
+# lugh-session: start the Lugh desktop session (Phases 1-4: on Hyprland, ADR-012).
+#
+# Started by greetd / the display manager through
+# /usr/share/wayland-sessions/lugh.desktop (Exec=lugh-session).
+#
+#   lugh-session            set the session environment, run the compositor,
+#                           and tear the session down when it exits
+#   lugh-session --ready    called by the compositor once it is up (see
+#                           /usr/share/lugh/hypr/conf.d/70-session.lua): import
+#                           the environment into systemd + D-Bus, then start
+#                           lugh-session.target (-> lugh-shell.service)
+#   lugh-session --stop     stop the session units (also used on exit)
+#
+# Environment overrides:
+#   LUGH_HYPR_CONFIG   config entry point (default /usr/share/lugh/hypr/lugh.lua)
+#   LUGH_LOW_POWER=1   start with the low-power profile
+set -u
+
+LUGH_HYPR_CONFIG=${LUGH_HYPR_CONFIG:-/usr/share/lugh/hypr/lugh.lua}
+
+# Variables pushed into the systemd user manager and D-Bus activation, so
+# services and D-Bus-activated apps (portals, the shell, file choosers) can
+# reach the display and use the same toolkit settings as apps started from
+# the shell. An explicit list rather than --all: no shell junk (PWD, SHLVL,
+# OLDPWD, ...) leaks into every user service, and nothing stale survives.
+SESSION_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP DESKTOP_SESSION
+XDG_SESSION_ID XDG_SEAT XDG_VTNR LUGH_SESSION
+XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_SIZE
+QT_QPA_PLATFORM QT_WAYLAND_DISABLE_WINDOWDECORATION GDK_BACKEND
+MOZ_ENABLE_WAYLAND ELECTRON_OZONE_PLATFORM_HINT _JAVA_AWT_WM_NONREPARENTING"
+
+# Removed from the user manager when the session ends (they point at a
+# compositor that no longer exists).
+DISPLAY_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE LUGH_SESSION"
+
+log() {
+    printf 'lugh-session: %s\n' "$*" >&2
+}
+
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Session identity, needed before the compositor starts. The toolkit
+# variables (Qt, GTK, cursor, ...) are set by the compositor config
+# (conf.d/00-env.lua) so nested test sessions get them too.
+set_env() {
+    export XDG_SESSION_TYPE=wayland
+    export XDG_CURRENT_DESKTOP=Lugh:Hyprland
+    export XDG_SESSION_DESKTOP=lugh
+    export DESKTOP_SESSION=lugh
+    export LUGH_SESSION=1
+}
+
+# Only the variables of SESSION_VARS that are set in this environment.
+present_vars() {
+    for v in $SESSION_VARS; do
+        eval "isset=\${$v+x}"
+        # shellcheck disable=SC2154 # isset is assigned by eval above
+        if [ -n "$isset" ]; then
+            printf '%s ' "$v"
+        fi
+    done
+}
+
+import_env() {
+    vars=$(present_vars)
+    # $vars is a list of names: word splitting is intended.
+    # shellcheck disable=SC2086
+    if have dbus-update-activation-environment; then
+        # --systemd also updates the systemd user manager.
+        dbus-update-activation-environment --systemd $vars
+    else
+        systemctl --user import-environment $vars
+    fi
+}
+
+stop_session() {
+    systemctl --user stop lugh-session.target 2>/dev/null
+    # Apps launched from the shell live in app-lugh-*.scope (ADR-015). Without
+    # a compositor they are useless: end them politely (SIGTERM, then the
+    # unit's stop timeout).
+    systemctl --user stop 'app-lugh-*.scope' 2>/dev/null
+    # shellcheck disable=SC2086 # list of names
+    systemctl --user unset-environment $DISPLAY_VARS 2>/dev/null
+    return 0
+}
+
+ready() {
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        # No systemd user manager: start the shell directly so the desktop
+        # still works (no restart-on-crash, no portals ordering).
+        log "no systemd user manager, starting lugh-shell directly"
+        exec lugh-shell
+    fi
+    import_env
+    systemctl --user reset-failed lugh-shell.service 2>/dev/null
+    exec systemctl --user start --no-block lugh-session.target
+}
+
+# Start the compositor and wait for it. Not exec'd: we tear down afterwards.
+run() {
+    set_env
+
+    # A previous session that crashed may have left the target running.
+    if systemctl --user is-active --quiet lugh-session.target 2>/dev/null; then
+        log "stopping a leftover lugh-session.target"
+        stop_session
+    fi
+
+    if [ ! -r "$LUGH_HYPR_CONFIG" ]; then
+        log "config not found: $LUGH_HYPR_CONFIG"
+        exit 1
+    fi
+
+    # start-hyprland (Hyprland >= 0.53) is the watchdog launcher upstream
+    # asks distributions to use; it passes everything after -- to Hyprland.
+    if have start-hyprland; then
+        set -- start-hyprland -- --config "$LUGH_HYPR_CONFIG"
+    elif have Hyprland; then
+        set -- Hyprland --config "$LUGH_HYPR_CONFIG"
+    else
+        log "Hyprland is not installed"
+        exit 1
+    fi
+
+    # Compositor output goes to the journal under its own tag (Hyprland also
+    # keeps its own log in $XDG_RUNTIME_DIR/hypr/).
+    if have systemd-cat; then
+        set -- systemd-cat --identifier=lugh-hyprland -- "$@"
+    fi
+
+    # Keep the real stdin (a background job would get /dev/null otherwise).
+    exec 3<&0
+    "$@" <&3 3<&- &
+    compositor=$!
+    exec 3<&-
+
+    # greetd/logind end the session with SIGTERM/SIGHUP: pass it on, then
+    # carry on with the teardown once the compositor is gone.
+    trap 'kill -TERM "$compositor" 2>/dev/null' TERM HUP INT
+
+    status=0
+    while :; do
+        wait "$compositor"
+        status=$?
+        # wait returns >128 when interrupted by a trapped signal.
+        kill -0 "$compositor" 2>/dev/null || break
+    done
+    trap - TERM HUP INT
+
+    stop_session
+    exit "$status"
+}
+
+case "${1:-}" in
+    "")
+        run
+        ;;
+    --ready)
+        ready
+        ;;
+    --stop)
+        stop_session
+        ;;
+    -h|--help)
+        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    *)
+        log "unknown argument: $1 (see --help)"
+        exit 2
+        ;;
+esac
