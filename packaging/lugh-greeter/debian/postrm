@@ -1,0 +1,11 @@
+#!/bin/sh
+# lugh-greeter postrm: the greeter state goes away on purge.
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = purge ]; then
+	rm -rf /var/lib/lugh-greeter /run/lugh-greeter
+fi
+
+exit 0
