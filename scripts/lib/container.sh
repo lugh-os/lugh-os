@@ -23,6 +23,12 @@
 # or absolute /src/... paths) are chowned back to the host user, so no
 # root-owned files are left in the checkout. The command's exit status is
 # returned.
+#
+# Rust: the named volumes lugh-hello-rustup and lugh-hello-cargo (shared with
+# `make hello`, scripts/build-shell.sh and scripts/build-greeter.sh) are mounted
+# on /root/.rustup and /root/.cargo/registry, so the toolchain and the crate
+# downloads survive between runs. Set LUGH_CARGO_OFFLINE=1 for `cargo --offline`
+# builds from a vendored tree (docs/dev/packaging.md).
 
 if [[ -z "${REPO_ROOT:-}" ]]; then
 	REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -138,6 +144,8 @@ run_in_build_env() {
 	"$CONTAINER_ENGINE" run --rm -i "${tty[@]}" --init \
 		--user 0:0 \
 		-v "$REPO_ROOT:/src" -w /src \
+		-v lugh-hello-rustup:/root/.rustup \
+		-v lugh-hello-cargo:/root/.cargo/registry \
 		-e "_LUGH_OWNER=$owner" \
 		-e "_LUGH_CHOWN_PATHS=${LUGH_CHOWN_PATHS:-}" \
 		"${opts[@]}" \
