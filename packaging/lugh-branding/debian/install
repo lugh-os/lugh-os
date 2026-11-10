@@ -8,3 +8,4 @@ branding/icons/hicolor usr/share/icons/
 branding/icons/hicolor/256x256/apps/lugh-logo.png usr/share/pixmaps/
 branding/icons/hicolor/scalable/apps/lugh-logo.svg usr/share/pixmaps/
 branding/logo/*.svg usr/share/lugh/branding/logo/
+branding/wallpapers/*.jpg usr/share/backgrounds/lugh/
