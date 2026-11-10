@@ -1,0 +1,15 @@
+# greetd on the Lugh live image (greetd.service.d/10-lugh-live.conf points
+# greetd here; the installed system uses lugh-greeter's /etc/greetd/config.toml).
+#
+# The first session after boot logs the live user straight into the desktop.
+# Logging out shows the Lugh sign-in screen: user "lugh", password "live".
+[terminal]
+vt = 7
+
+[default_session]
+command = "/usr/libexec/lugh/greeter-session"
+user = "_greetd"
+
+[initial_session]
+command = "lugh-session"
+user = "lugh"
