@@ -470,7 +470,9 @@ fn start_with(ctx: &Context, conn: Option<zbus::Connection>) -> Box<dyn Service>
     let inner = Arc::new(Inner {
         ctx: ctx.clone(),
         state: Mutex::new(State {
-            low_power: false,
+            // lugh-session exports LUGH_LOW_POWER=1 on software rendering, so
+            // a restarted shell comes back in the same state.
+            low_power: std::env::var_os("LUGH_LOW_POWER").is_some_and(|v| v == "1"),
             primary: true,
         }),
         ready_sent: AtomicBool::new(false),
