@@ -1,0 +1,35 @@
+Source: lugh-shell
+Section: x11
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: debhelper-compat (= 13), cmake, libpam0g-dev, pkgconf, qt6-base-dev, qt6-declarative-dev, qt6-declarative-dev-tools
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-shell
+Architecture: amd64
+Depends: adwaita-icon-theme,
+         dbus-user-session,
+         grim,
+         layer-shell-qt,
+         lugh-ui (= ${source:Version}),
+         network-manager,
+         papirus-icon-theme,
+         pipewire-pulse,
+         pulseaudio-utils,
+         qml6-module-org-kde-layershell,
+         qt6-wayland,
+         slurp,
+         upower,
+         wireplumber,
+         wl-clipboard,
+         xdg-utils,
+         ${misc:Depends},
+         ${shlibs:Depends}
+Recommends: bluez, power-profiles-daemon, qml6-module-qtwebsockets
+Description: Lugh desktop shell
+ The shell of the Lugh desktop: top bar, dock, launcher, notifications,
+ control center, on-screen displays, lock screen and polkit agent, as one
+ Qt 6 / QML process on a Wayland compositor with wlr-layer-shell.
+ .
+ Started by the lugh-session.target systemd user unit (package lugh-session).
