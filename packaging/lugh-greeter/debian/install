@@ -1,0 +1,3 @@
+build/lugh-greeter usr/bin/
+ui/greeter/qml usr/share/lugh/greeter/
+debian/greeter-session usr/libexec/lugh/
