@@ -1,0 +1,6 @@
+#%PAM-1.0
+# Lugh lock screen (lugh-shell). Installed as /etc/pam.d/lugh-lock.
+# Checks the password of the user who owns the session; pam_unix does this
+# for an unprivileged process through its setgid helper, unix_chkpwd.
+@include common-auth
+@include common-account
