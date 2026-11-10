@@ -1,0 +1,41 @@
+activelayout>>AT Translated Set 2 keyboard,English (US)
+openlayer>>lugh-bar
+openlayer>>lugh-dock
+workspace>>1
+workspacev2>>1,1
+focusedmon>>eDP-1,1
+focusedmonv2>>eDP-1,1
+activewindow>>firefox,Lugh — Mozilla Firefox
+activewindowv2>>5a3e1d2c4a00
+createworkspace>>2
+createworkspacev2>>2,2
+workspace>>2
+workspacev2>>2,2
+openwindow>>5a3e1d2c4b10,2,org.codeberg.dnkl.foot,amara@lugh-laptop: ~
+activewindow>>org.codeberg.dnkl.foot,amara@lugh-laptop: ~
+activewindowv2>>5a3e1d2c4b10
+windowtitle>>5a3e1d2c4b10
+windowtitlev2>>5a3e1d2c4b10,vim notes, todo.md >> draft
+changefloatingmode>>5a3e1d2c4b10,0
+fullscreen>>1
+fullscreen>>0
+movewindow>>5a3e1d2c4b10,1
+movewindowv2>>5a3e1d2c4b10,1,1
+destroyworkspace>>2
+destroyworkspacev2>>2,2
+workspace>>1
+workspacev2>>1,1
+createworkspace>>special:magic
+createworkspacev2>>-98,special:magic
+activespecial>>special:magic,eDP-1
+activespecialv2>>-98,special:magic,eDP-1
+urgent>>5a3e1d2c4a00
+closewindow>>5a3e1d2c4b10
+activewindow>>,
+activewindowv2>>
+monitoradded>>HDMI-A-1
+monitoraddedv2>>1,HDMI-A-1,Dell Inc. DELL U2720Q 7ZXW123
+renameworkspace>>1,web
+configreloaded>>
+bell>>
+closelayer>>lugh-dock
