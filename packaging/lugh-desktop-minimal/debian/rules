@@ -1,0 +1,5 @@
+#!/usr/bin/make -f
+# Nothing is compiled: a metapackage.
+
+%:
+	dh $@
