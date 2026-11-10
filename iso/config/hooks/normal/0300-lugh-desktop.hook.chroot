@@ -1,0 +1,25 @@
+#!/bin/sh
+# The Lugh desktop on the live image: greetd is the only display manager and
+# the graphical target is the default; Hyprland must be the backports one.
+set -e
+
+for dm in gdm3 sddm lightdm lxdm xdm slim ly; do
+	if dpkg-query -W -f='${Status}' "$dm" 2>/dev/null | grep -q "install ok installed"; then
+		echo "E: lugh-desktop: display manager '$dm' is installed; greetd must be the only one" >&2
+		exit 1
+	fi
+done
+
+for pkg in greetd cage hyprland lugh-shell lugh-greeter lugh-session; do
+	dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" || {
+		echo "E: lugh-desktop: $pkg is not installed" >&2
+		exit 1
+	}
+done
+echo "I: lugh-desktop: hyprland $(dpkg-query -W -f='${Version}' hyprland)"
+
+systemctl enable greetd.service
+systemctl set-default graphical.target
+
+# The greeter remembers the last user and session here.
+install -d -o _greetd -g _greetd -m 0750 /var/lib/lugh-greeter
