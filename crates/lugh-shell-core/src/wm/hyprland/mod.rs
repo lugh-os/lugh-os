@@ -5,23 +5,40 @@
 //! `/tmp/hypr/<signature>/`):
 //!
 //! - `.socket.sock`: one request per connection (`j/clients`,
-//!   `dispatch workspace 2`, `[[BATCH]]cmd;cmd`), answered and closed.
+//!   `dispatch …`, `[[BATCH]]cmd;cmd`), answered and closed.
 //! - `.socket2.sock`: a stream of `EVENT>>DATA\n` lines, parsed by
 //!   [`parse_event`].
 //!
-//! The event reader thread reconnects with exponential backoff when the
-//! socket drops and then emits [`WmEvent::Reconnected`].
+//! # Dispatch syntax (Hyprland 0.55 and the Lua config)
+//!
+//! With the Lua config manager (Lugh's, ADR-026) Hyprland evaluates
+//! `dispatch X` as the Lua chunk `return hl.dispatch(X)` (`dispatchRequest`
+//! in `src/debug/HyprCtl.cpp`, v0.55.0), so `X` must be a dispatcher
+//! expression such as `hl.dsp.focus({ workspace = 2 })`. A hyprlang string
+//! (`dispatch workspace 2`) is a Lua syntax error there and answers
+//! `error: …`. With the legacy hyprlang config manager the first word is a
+//! dispatcher name, and a Lua expression answers `Invalid dispatcher`.
+//!
+//! Every dispatch therefore has both forms ([`Dispatch`]). The Lua form is
+//! sent first; when the compositor answers `Invalid dispatcher` the adapter
+//! remembers that this instance speaks hyprlang and uses the legacy form
+//! from then on.
+//!
+//! The event reader thread blocks in `read` (no polling). It reconnects
+//! with exponential backoff when the socket drops, emitting
+//! [`WmEvent::Disconnected`] and then [`WmEvent::Reconnected`].
 
 mod event;
 mod json;
 
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -43,8 +60,98 @@ pub const EVENT_SOCKET: &str = ".socket2.sock";
 const MAX_EVENT_LINE: usize = 64 * 1024;
 /// Largest accepted request reply.
 const MAX_REPLY: u64 = 16 * 1024 * 1024;
-/// How often the event reader checks whether its stream was dropped.
+/// Longest slice the event reader sleeps while waiting to reconnect, so a
+/// dropped stream ends the thread quickly.
 const POLL: Duration = Duration::from_millis(200);
+/// Reply of the hyprlang config manager to a Lua dispatch expression.
+const INVALID_DISPATCHER: &str = "Invalid dispatcher";
+
+const SYNTAX_UNKNOWN: u8 = 0;
+const SYNTAX_LUA: u8 = 1;
+const SYNTAX_LEGACY: u8 = 2;
+
+/// One dispatcher call in both syntaxes (see the module docs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dispatch {
+    /// Lua dispatcher expression: `hl.dsp.focus({ workspace = 2 })`.
+    pub lua: String,
+    /// hyprlang form: `workspace 2`.
+    pub legacy: String,
+}
+
+impl Dispatch {
+    /// Focus a window (switches to its workspace).
+    pub fn focus_window(id: &WindowId) -> Result<Self, WmError> {
+        let a = address(id)?;
+        Ok(Self {
+            lua: format!("hl.dsp.focus({{ window = \"{a}\" }})"),
+            legacy: format!("focuswindow {a}"),
+        })
+    }
+
+    /// Raise a window above the other floating windows.
+    pub fn raise_window(id: &WindowId) -> Result<Self, WmError> {
+        let a = address(id)?;
+        Ok(Self {
+            lua: format!("hl.dsp.window.alter_zorder({{ mode = \"top\", window = \"{a}\" }})"),
+            legacy: format!("alterzorder top,{a}"),
+        })
+    }
+
+    /// Ask a window to close.
+    pub fn close_window(id: &WindowId) -> Result<Self, WmError> {
+        let a = address(id)?;
+        Ok(Self {
+            lua: format!("hl.dsp.window.close({{ window = \"{a}\" }})"),
+            legacy: format!("closewindow {a}"),
+        })
+    }
+
+    /// Show a regular workspace on the focused monitor.
+    pub fn workspace(ws: WorkspaceId) -> Result<Self, WmError> {
+        let n = regular(ws)?;
+        Ok(Self {
+            lua: format!("hl.dsp.focus({{ workspace = {n} }})"),
+            legacy: format!("workspace {n}"),
+        })
+    }
+
+    /// Move a window to a regular workspace without following it.
+    pub fn move_window(id: &WindowId, ws: WorkspaceId) -> Result<Self, WmError> {
+        let (a, n) = (address(id)?, regular(ws)?);
+        Ok(Self {
+            lua: format!(
+                "hl.dsp.window.move({{ workspace = {n}, follow = false, window = \"{a}\" }})"
+            ),
+            legacy: format!("movetoworkspacesilent {n},{a}"),
+        })
+    }
+
+    /// Change a window's floating state.
+    pub fn float(id: &WindowId, action: FloatAction) -> Result<Self, WmError> {
+        let a = address(id)?;
+        let (lua, legacy) = match action {
+            FloatAction::Toggle => ("toggle", "togglefloating"),
+            FloatAction::Float => ("set", "setfloating"),
+            FloatAction::Tile => ("unset", "settiled"),
+        };
+        Ok(Self {
+            lua: format!("hl.dsp.window.float({{ action = \"{lua}\", window = \"{a}\" }})"),
+            legacy: format!("{legacy} {a}"),
+        })
+    }
+}
+
+/// What [`Dispatch::float`] does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatAction {
+    /// Flip the state.
+    Toggle,
+    /// Make it float.
+    Float,
+    /// Make it tiled.
+    Tile,
+}
 const BACKOFF_START: Duration = Duration::from_millis(100);
 const BACKOFF_MAX: Duration = Duration::from_secs(5);
 
@@ -93,6 +200,9 @@ fn show_paths(paths: &[PathBuf]) -> String {
 pub struct HyprlandAdapter {
     dir: PathBuf,
     timeout: Duration,
+    /// Which dispatch syntax this instance accepts (`SYNTAX_*`), learnt from
+    /// the first answers and shared between clones.
+    syntax: Arc<AtomicU8>,
 }
 
 impl HyprlandAdapter {
@@ -110,6 +220,7 @@ impl HyprlandAdapter {
         Self {
             dir: dir.into(),
             timeout: Duration::from_secs(2),
+            syntax: Arc::new(AtomicU8::new(SYNTAX_UNKNOWN)),
         }
     }
 
@@ -157,24 +268,52 @@ impl HyprlandAdapter {
         })
     }
 
-    /// Runs one dispatcher: `dispatch <dispatcher> <arg>`.
-    pub fn dispatch(&self, dispatcher: &str, arg: &str) -> Result<(), WmError> {
-        let request = format!("dispatch {dispatcher} {arg}");
-        check_ok(&request, self.request(&request)?)
+    /// Runs one dispatcher, in the syntax this instance accepts (Lua first;
+    /// see the module docs).
+    pub fn dispatch(&self, cmd: &Dispatch) -> Result<(), WmError> {
+        self.dispatch_all(std::slice::from_ref(cmd))
     }
 
-    /// Runs several commands in one `[[BATCH]]` request; fails unless every
-    /// one answers `ok`.
+    /// Runs several dispatchers in one `[[BATCH]]` request; fails unless
+    /// every one answers `ok`.
+    pub fn dispatch_all(&self, cmds: &[Dispatch]) -> Result<(), WmError> {
+        if cmds.is_empty() {
+            return Ok(());
+        }
+        let send = |legacy: bool| -> Result<(String, String), WmError> {
+            let parts: Vec<String> = cmds
+                .iter()
+                .map(|c| format!("dispatch {}", if legacy { &c.legacy } else { &c.lua }))
+                .collect();
+            let request = match parts.as_slice() {
+                [one] => one.clone(),
+                many => batch_request(many)?,
+            };
+            let reply = self.request(&request)?;
+            Ok((request, reply))
+        };
+        if self.syntax.load(Ordering::Relaxed) != SYNTAX_LEGACY {
+            let (request, reply) = send(false)?;
+            if !reply.contains(INVALID_DISPATCHER) {
+                if reply.trim_start().starts_with("ok") {
+                    self.syntax.store(SYNTAX_LUA, Ordering::Relaxed);
+                }
+                return check_ok(&request, reply);
+            }
+            tracing::info!("Hyprland runs a hyprlang config; using legacy dispatch syntax");
+            self.syntax.store(SYNTAX_LEGACY, Ordering::Relaxed);
+        }
+        let (request, reply) = send(true)?;
+        check_ok(&request, reply)
+    }
+
+    /// Runs several raw commands in one `[[BATCH]]` request; fails unless
+    /// every one answers `ok`.
     pub fn batch(&self, commands: &[String]) -> Result<(), WmError> {
         if commands.is_empty() {
             return Ok(());
         }
-        if let Some(bad) = commands.iter().find(|c| c.contains(';')) {
-            return Err(WmError::InvalidArgument(format!(
-                "batch command contains ';': {bad:?}"
-            )));
-        }
-        let request = format!("[[BATCH]]{}", commands.join(";"));
+        let request = batch_request(commands)?;
         check_ok(&request, self.request(&request)?)
     }
 
@@ -186,6 +325,15 @@ impl HyprlandAdapter {
             .filter_map(Client::into_toplevel)
             .collect())
     }
+}
+
+fn batch_request(commands: &[String]) -> Result<String, WmError> {
+    if let Some(bad) = commands.iter().find(|c| c.contains(';')) {
+        return Err(WmError::InvalidArgument(format!(
+            "batch command contains ';': {bad:?}"
+        )));
+    }
+    Ok(format!("[[BATCH]]{}", commands.join(";")))
 }
 
 /// Address in the form Hyprland's `address:` selector accepts; rejects
@@ -272,10 +420,13 @@ impl CompositorAdapter for HyprlandAdapter {
         })?;
         let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
+        // The reader blocks in `read`; shutting the socket down wakes it.
+        let current = Arc::new(Mutex::new(stream.try_clone().ok()));
         let reader = EventReader {
             path,
-            tx,
+            tx: tx.clone(),
             stop: Arc::clone(&stop),
+            current: Arc::clone(&current),
         };
         std::thread::Builder::new()
             .name("lugh-wm-events".into())
@@ -284,28 +435,39 @@ impl CompositorAdapter for HyprlandAdapter {
                 context: "spawning the event reader".into(),
                 source,
             })?;
-        Ok(EventStream::new(rx, stop))
+        Ok(EventStream::new(rx, stop)
+            .with_injector(tx)
+            .with_on_drop(move || {
+                let guard = current.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(s) = guard.as_ref() {
+                    let _ = s.shutdown(Shutdown::Both);
+                }
+            }))
     }
 
     fn activate(&self, id: &WindowId) -> Result<(), WmError> {
-        self.dispatch("focuswindow", &address(id)?)
+        self.dispatch(&Dispatch::focus_window(id)?)?;
+        // Lugh mode floats windows: focus alone can leave it under another.
+        if let Err(e) = self.dispatch(&Dispatch::raise_window(id)?) {
+            tracing::debug!(error = %e, "could not raise the activated window");
+        }
+        Ok(())
     }
 
     fn close(&self, id: &WindowId) -> Result<(), WmError> {
-        self.dispatch("closewindow", &address(id)?)
+        self.dispatch(&Dispatch::close_window(id)?)
     }
 
     fn switch_workspace(&self, ws: WorkspaceId) -> Result<(), WmError> {
-        self.dispatch("workspace", &regular(ws)?.to_string())
+        self.dispatch(&Dispatch::workspace(ws)?)
     }
 
     fn move_to_workspace(&self, id: &WindowId, ws: WorkspaceId) -> Result<(), WmError> {
-        let arg = format!("{},{}", regular(ws)?, address(id)?);
-        self.dispatch("movetoworkspacesilent", &arg)
+        self.dispatch(&Dispatch::move_window(id, ws)?)
     }
 
     fn toggle_floating(&self, id: &WindowId) -> Result<(), WmError> {
-        self.dispatch("togglefloating", &address(id)?)
+        self.dispatch(&Dispatch::float(id, FloatAction::Toggle)?)
     }
 
     fn toggle_workspace_tiling(&self, ws: WorkspaceId) -> Result<bool, WmError> {
@@ -315,12 +477,16 @@ impl CompositorAdapter for HyprlandAdapter {
             .filter(|t| t.workspace == ws)
             .collect();
         let tile = on_ws.iter().any(|t| t.floating);
-        let dispatcher = if tile { "settiled" } else { "setfloating" };
+        let action = if tile {
+            FloatAction::Tile
+        } else {
+            FloatAction::Float
+        };
         let commands = on_ws
             .iter()
-            .map(|t| Ok(format!("dispatch {dispatcher} {}", address(&t.id)?)))
+            .map(|t| Dispatch::float(&t.id, action))
             .collect::<Result<Vec<_>, WmError>>()?;
-        self.batch(&commands)?;
+        self.dispatch_all(&commands)?;
         Ok(tile)
     }
 
@@ -334,6 +500,8 @@ struct EventReader {
     path: PathBuf,
     tx: Sender<WmEvent>,
     stop: Arc<AtomicBool>,
+    /// The socket being read, for the stream's drop hook to shut down.
+    current: Arc<Mutex<Option<UnixStream>>>,
 }
 
 enum ReadEnd {
@@ -351,9 +519,17 @@ impl EventReader {
                 ReadEnd::Stopped => return,
                 ReadEnd::Lost => {}
             }
+            self.set_current(None);
             tracing::warn!(path = %self.path.display(), "Hyprland event socket lost, reconnecting");
+            if self.tx.send(WmEvent::Disconnected).is_err() {
+                return;
+            }
             match self.reconnect() {
                 Some(s) => {
+                    self.set_current(s.try_clone().ok());
+                    if self.stopped() {
+                        return;
+                    }
                     stream = s;
                     if self.tx.send(WmEvent::Reconnected).is_err() {
                         return;
@@ -362,6 +538,10 @@ impl EventReader {
                 None => return,
             }
         }
+    }
+
+    fn set_current(&self, stream: Option<UnixStream>) {
+        *self.current.lock().unwrap_or_else(PoisonError::into_inner) = stream;
     }
 
     fn stopped(&self) -> bool {
@@ -394,10 +574,6 @@ impl EventReader {
     }
 
     fn read_lines(&self, stream: UnixStream) -> ReadEnd {
-        if let Err(e) = stream.set_read_timeout(Some(POLL)) {
-            tracing::warn!(error = %e, "cannot set a read timeout on the event socket");
-            return ReadEnd::Lost;
-        }
         let mut reader = BufReader::with_capacity(8 * 1024, stream);
         let mut line = Vec::with_capacity(256);
         let mut skipping = false;
@@ -406,6 +582,7 @@ impl EventReader {
                 return ReadEnd::Stopped;
             }
             let chunk = match reader.fill_buf() {
+                Ok([]) if self.stopped() => return ReadEnd::Stopped,
                 Ok([]) => return ReadEnd::Lost,
                 Ok(chunk) => chunk,
                 Err(e)
@@ -508,6 +685,34 @@ mod tests {
         assert!(regular(WorkspaceId(0)).is_err());
         assert!(regular(WorkspaceId(-98)).is_err());
         assert_eq!(regular(WorkspaceId(3)).unwrap(), 3);
+    }
+
+    #[test]
+    fn dispatch_forms() {
+        let w = WindowId::new("0x55aa");
+        let d = Dispatch::focus_window(&w).unwrap();
+        assert_eq!(d.lua, r#"hl.dsp.focus({ window = "address:0x55aa" })"#);
+        assert_eq!(d.legacy, "focuswindow address:0x55aa");
+        let d = Dispatch::move_window(&w, WorkspaceId(3)).unwrap();
+        assert_eq!(
+            d.lua,
+            r#"hl.dsp.window.move({ workspace = 3, follow = false, window = "address:0x55aa" })"#
+        );
+        assert_eq!(d.legacy, "movetoworkspacesilent 3,address:0x55aa");
+        assert_eq!(
+            Dispatch::workspace(WorkspaceId(2)).unwrap().lua,
+            "hl.dsp.focus({ workspace = 2 })"
+        );
+        assert_eq!(
+            Dispatch::float(&w, FloatAction::Tile).unwrap().lua,
+            r#"hl.dsp.window.float({ action = "unset", window = "address:0x55aa" })"#
+        );
+        assert_eq!(
+            Dispatch::close_window(&w).unwrap().lua,
+            r#"hl.dsp.window.close({ window = "address:0x55aa" })"#
+        );
+        assert!(Dispatch::close_window(&WindowId::new("0x1\"})--")).is_err());
+        assert!(Dispatch::workspace(WorkspaceId(-98)).is_err());
     }
 
     #[test]
