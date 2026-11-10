@@ -1,0 +1,41 @@
+# lugh-shell: bar, dock, launcher, notifications (org.freedesktop.Notifications),
+# control center, OSDs, lock screen (ext-session-lock) and the polkit agent.
+# The polkit agent runs inside the shell (no separate lugh-polkit-agent unit).
+[Unit]
+Description=Lugh Shell
+Documentation=file:///usr/share/doc/lugh-session/hyprland.md
+PartOf=lugh-session.target
+After=lugh-session.target
+# Never start outside a Lugh session (e.g. through D-Bus activation from a TTY).
+Requisite=lugh-session.target
+# Pulled in by lugh-session.target (Wants=), so no `systemctl enable` is needed.
+# A crash loop must not spin forever: 10 starts within 60 s, then give up.
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+# Ready when the shell owns its bus name (space.lugh.Shell1), so D-Bus calls
+# from keybinds queue until the shell can answer them.
+Type=dbus
+BusName=space.lugh.Shell1
+ExecStart=/usr/bin/lugh-shell
+# Restart on any exit except `systemctl stop`, including a plain `kill`
+# (SIGTERM counts as a clean exit for on-failure). 200 ms back-off keeps the
+# gap under 1 s (Phase 1 acceptance #13). Apps live in their own scopes
+# (ADR-015) and are unaffected.
+Restart=always
+RestartSec=200ms
+TimeoutStopSec=5s
+Slice=session.slice
+
+# Resources. The shell is interactive: more CPU/IO weight than apps (100 is
+# the default), no realtime tricks. Nice can't go below 0 in a user manager.
+CPUWeight=200
+IOWeight=200
+# Leak tripwire: above 300 MB the kernel reclaims hard from the shell; at
+# 450 MB it is OOM-killed and restarted (state that matters is on disk).
+MemoryHigh=300M
+MemoryMax=450M
+# Journal: QML warnings are useful, but cap them.
+LogRateLimitIntervalSec=10s
+LogRateLimitBurst=200
