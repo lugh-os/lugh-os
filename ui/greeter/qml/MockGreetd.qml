@@ -5,7 +5,7 @@
 // screenshots and QML tests.
 //
 // Dev conveniences: the password "lugh" works for every listed user; any other
-// password fails after ~0.7 s. A typed username that isn't listed fails with
+// password fails after ~0.7 s (mockDelay). A typed username that isn't listed fails with
 // the same generic message (no account probing).
 import QtQuick
 
@@ -107,19 +107,38 @@ QtObject {
     function powerOff() { console.info("[mock greetd] power off"); }
 
     // ---- mock internals -----------------------------------------------------
+    // Mock-only knobs (not part of the contract): how long "PAM" takes, an
+    // info line sent with the first prompt, and a second prompt asked after a
+    // correct password (answer "123456").
+    property int mockDelay: 700
+    property string mockInfo: ""
+    property string mockSecondPrompt: ""
+    property bool _secondAsked: false
     function _known(userName) {
         for (const u of users) if (u.userName === userName) return true;
         return false;
     }
     property Timer _prompt: Timer {
         interval: 120
-        onTriggered: greetd.promptRequested(true, "Password:")
+        onTriggered: {
+            greetd._secondAsked = false;
+            if (greetd.mockInfo !== "") greetd.infoMessage(greetd.mockInfo);
+            greetd.promptRequested(true, "Password:");
+        }
     }
     property Timer _check: Timer {
         property string response
-        interval: 700
+        interval: greetd.mockDelay
         onTriggered: {
-            const ok = response === "lugh" && greetd._known(greetd.sessionUser);
+            let ok = response === "lugh" && greetd._known(greetd.sessionUser);
+            if (greetd.mockSecondPrompt !== "") {
+                if (!greetd._secondAsked && ok) {
+                    greetd._secondAsked = true;
+                    greetd.promptRequested(false, greetd.mockSecondPrompt);
+                    return;
+                }
+                ok = greetd._secondAsked && response === "123456";
+            }
             greetd.authenticating = false;
             if (ok) {
                 greetd.lastUser = greetd.sessionUser;
