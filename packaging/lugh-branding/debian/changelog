@@ -2,5 +2,7 @@ lugh-branding (0.0.1) trixie; urgency=medium
 
   * Initial release: os-release, issue and motd (diverted from base-files),
     GRUB theme and defaults, Plymouth theme, logo and icons.
+  * Wallpaper set (Dawn, Tide, Ember; light and dark, up to 5K) with its
+    wallpapers.json index in /usr/share/backgrounds/lugh.
 
  -- Lugh Developers <dev@lugh.example>  Mon, 09 Nov 2026 12:00:00 +0000
