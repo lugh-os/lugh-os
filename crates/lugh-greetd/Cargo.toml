@@ -1,0 +1,25 @@
+[package]
+name = "lugh-greetd"
+description = "Qt-free core of lugh-greeter: greetd IPC client, user and session discovery, greeter state, logind power actions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+zbus = { workspace = true, features = ["blocking-api"] }
+zeroize = "1"
+
+[dev-dependencies]
+tempfile.workspace = true
+zeroize = "1"
+
+[lints]
+workspace = true
