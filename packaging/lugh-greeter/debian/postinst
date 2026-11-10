@@ -1,0 +1,16 @@
+#!/bin/sh
+# lugh-greeter postinst: state directories owned by the greeter user. The
+# greetd configuration is diverted by config-package-dev (debhelper section).
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = configure ] && getent passwd _greetd >/dev/null 2>&1; then
+	install -d -m 0750 -o _greetd -g "$(id -gn _greetd)" /var/lib/lugh-greeter
+	# /run is recreated at boot by tmpfiles.d/lugh-greeter.conf.
+	if [ -d /run ]; then
+		install -d -m 0755 -o _greetd -g "$(id -gn _greetd)" /run/lugh-greeter || true
+	fi
+fi
+
+exit 0
