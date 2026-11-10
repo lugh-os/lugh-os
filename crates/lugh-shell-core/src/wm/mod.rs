@@ -27,7 +27,7 @@ mod state;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
 pub use state::{WmChange, WmState};
@@ -92,6 +92,33 @@ impl fmt::Display for WorkspaceId {
     }
 }
 
+/// A rectangle in the compositor's global layout coordinates (logical px).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize)]
+pub struct Rect {
+    /// Left edge.
+    pub x: i32,
+    /// Top edge.
+    pub y: i32,
+    /// Width.
+    pub w: i32,
+    /// Height.
+    pub h: i32,
+}
+
+impl Rect {
+    /// Whether the two rectangles share any area.
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.w > 0
+            && self.h > 0
+            && other.w > 0
+            && other.h > 0
+            && self.x < other.x.saturating_add(other.w)
+            && other.x < self.x.saturating_add(self.w)
+            && self.y < other.y.saturating_add(other.h)
+            && other.y < self.y.saturating_add(self.h)
+    }
+}
+
 /// A top-level window (`toplevels` model row).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Toplevel {
@@ -115,6 +142,10 @@ pub struct Toplevel {
     pub focused: bool,
     /// Asked for attention and has not been focused since.
     pub urgent: bool,
+    /// Position and size, when known. Only snapshots carry it: a window
+    /// reported by an `openwindow` event has `None` until the next snapshot,
+    /// and events never update it.
+    pub geometry: Option<Rect>,
 }
 
 /// A workspace (`workspaces` model row).
@@ -152,10 +183,37 @@ pub struct Monitor {
     pub y: i32,
     /// Output scale.
     pub scale: f64,
+    /// `wl_output` transform (0–7); odd values swap width and height.
+    pub transform: u8,
     /// Workspace currently shown on it.
     pub active_workspace: WorkspaceId,
     /// Has the keyboard/cursor focus.
     pub focused: bool,
+}
+
+impl Monitor {
+    /// The area the output covers in the global layout, in logical pixels
+    /// (mode size divided by the scale, swapped for 90°/270° transforms).
+    pub fn logical_rect(&self) -> Rect {
+        let scale = if self.scale.is_finite() && self.scale > 0.0 {
+            self.scale
+        } else {
+            1.0
+        };
+        #[allow(clippy::cast_possible_truncation)]
+        let px = |v: u32| (f64::from(v) / scale).round() as i32;
+        let (w, h) = if self.transform % 2 == 1 {
+            (px(self.height), px(self.width))
+        } else {
+            (px(self.width), px(self.height))
+        };
+        Rect {
+            x: self.x,
+            y: self.y,
+            w,
+            h,
+        }
+    }
 }
 
 /// The full window-manager state at one point in time.
@@ -330,6 +388,9 @@ pub enum WmEvent {
     },
     /// `configreloaded>>`: the compositor reloaded its configuration.
     ConfigReloaded,
+    /// Synthetic: the event connection dropped; the adapter is reconnecting.
+    /// Followed by [`WmEvent::Reconnected`] once it is back.
+    Disconnected,
     /// Synthetic: the event connection dropped and was re-established; events
     /// may have been missed, so resynchronise.
     Reconnected,
@@ -425,18 +486,55 @@ pub trait CompositorAdapter: Send + Sync + fmt::Debug {
 ///
 /// It is an [`Iterator`] that blocks for the next event and ends when the
 /// adapter gives up (it reconnects on its own first). Dropping the stream
-/// stops the reader thread within its poll interval.
-#[derive(Debug)]
+/// stops the reader thread at once (its blocking read is interrupted).
 pub struct EventStream {
     rx: Receiver<WmEvent>,
     stop: Arc<AtomicBool>,
+    injector: Option<Sender<WmEvent>>,
+    on_drop: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl fmt::Debug for EventStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EventStream").finish_non_exhaustive()
+    }
 }
 
 impl EventStream {
     /// Builds a stream from a channel; `stop` is raised when the stream is
     /// dropped so the producer can exit. For adapter implementations.
     pub fn new(rx: Receiver<WmEvent>, stop: Arc<AtomicBool>) -> Self {
-        Self { rx, stop }
+        Self {
+            rx,
+            stop,
+            injector: None,
+            on_drop: None,
+        }
+    }
+
+    /// Keeps a sender of the stream's own channel so
+    /// [`injector`](Self::injector) can hand it out. For adapter
+    /// implementations.
+    #[must_use]
+    pub fn with_injector(mut self, tx: Sender<WmEvent>) -> Self {
+        self.injector = Some(tx);
+        self
+    }
+
+    /// Runs `f` when the stream is dropped, after `stop` is raised (e.g. to
+    /// shut the socket down so a blocked reader returns). For adapter
+    /// implementations.
+    #[must_use]
+    pub fn with_on_drop(mut self, f: impl FnOnce() + Send + 'static) -> Self {
+        self.on_drop = Some(Box::new(f));
+        self
+    }
+
+    /// A sender into this stream, to wake a thread blocked on it from
+    /// elsewhere (send any event, e.g. [`WmEvent::Unknown`]). `None` when the
+    /// adapter did not provide one.
+    pub fn injector(&self) -> Option<Sender<WmEvent>> {
+        self.injector.clone()
     }
 
     /// Returns the next event if one is queued, without blocking. `Ok(None)`
@@ -473,6 +571,9 @@ impl Iterator for EventStream {
 impl Drop for EventStream {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(f) = self.on_drop.take() {
+            f();
+        }
     }
 }
 
