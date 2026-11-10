@@ -121,7 +121,12 @@ Item {
             readonly property real _fixed: root.pad + top.height + Theme.space8 + root.pad
             readonly property real _listMax: Math.max(80, root.maxPanelHeight - _fixed)
             readonly property bool _empty: rows.count === 0
-            readonly property real wantedHeight: _fixed + (_empty ? emptyState.height : Math.min(list.contentHeight, _listMax))
+            // The list's content height, taken after the fact: the panel's
+            // height feeds the list's, whose contentHeight is an estimate that
+            // depends on it (a binding would loop).
+            property real _listH: 0
+            function _measure() { _listH = list.contentHeight; }
+            readonly property real wantedHeight: _fixed + (_empty ? emptyState.height : Math.min(_listH, _listMax))
 
             // ---- rows ------------------------------------------------------
             ListModel { id: rows }
@@ -135,7 +140,7 @@ Item {
                 function onGroupsChanged() { Qt.callLater(content.sync); }
                 function on_ExpandedChanged() { Qt.callLater(content.sync); }
             }
-            Component.onCompleted: { N.syncRows(rows, N.flatten(root.groups, root._expanded, root.groupLimit)); list.currentIndex = -1; }
+            Component.onCompleted: { N.syncRows(rows, N.flatten(root.groups, root._expanded, root.groupLimit)); list.currentIndex = -1; _measure(); }
 
             function toggleGroup(appName) {
                 const e = Object.assign({}, root._expanded);
@@ -296,6 +301,7 @@ Item {
             ListView {
                 id: list
                 objectName: "notificationHistory"
+                onContentHeightChanged: Qt.callLater(content._measure)
                 x: root.pad
                 y: top.y + top.height + Theme.space8
                 width: parent.width - 2 * root.pad
