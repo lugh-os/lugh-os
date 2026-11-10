@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+# Nothing is compiled: the files listed in debian/lugh-sources are copied into
+# the build tree by scripts/build-debs.sh and installed by debian/install.
+
+%:
+	dh $@
+
+override_dh_auto_test:
+	# DesktopNames is the key display managers read from session files
+	# (Hyprland's own hyprland.desktop has it); the validator only knows
+	# application entries, so that one complaint is expected.
+	desktop-file-validate ui/shell/session/lugh.desktop 2>&1 | grep -v 'key "DesktopNames"' | \
+	  { ! grep . ; }
+	sh -n ui/shell/session/lugh-session
+	for f in ui/shell/hypr/scripts/*.sh; do sh -n "$$f" || exit 1; done
