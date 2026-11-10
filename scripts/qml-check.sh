@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Headless QML load check: loads every demo, every Lugh.Shell surface and the
-# desktop preview (each --state) with QT_QPA_PLATFORM=offscreen and fails on
-# any QML warning or error. `make qml-check` runs it.
+# Headless QML load check: loads every demo (LughUI incl. liquid, shell,
+# greeter), every Lugh.Shell surface and the desktop preview (each --state)
+# with QT_QPA_PLATFORM=offscreen, then the production root main.qml in a
+# headless nested KWin, and fails on any QML warning or error.
+# `make qml-check` runs it.
 #   scripts/qml-check.sh            # everything
 #   scripts/qml-check.sh -v         # also print each item's full output
 set -uo pipefail
@@ -45,6 +47,10 @@ run() {
 shopt -s nullglob globstar
 for f in ui/components/demos/*.qml ui/components/gallery/*.qml ui/shell/qml/demos/*.qml \
          ui/shell/qml/Lugh/Shell/**/*Demo.qml ui/greeter/qml/GreeterDemo.qml; do
+  # The WebSocket backend demo needs lugh-shell-devd listening on :7777.
+  if [[ "$f" == */backend/WsBackendDemo.qml ]] && ! (exec 3<>/dev/tcp/127.0.0.1/7777) 2>/dev/null; then
+    echo "skip  $f (no lugh-shell-devd on 127.0.0.1:7777)"; continue
+  fi
   run "$f" "$harness" -- --file "file://$root/$f" "${wp[@]}"
 done
 
@@ -60,9 +66,28 @@ while read -r type _ file; do
 done < ui/shell/qml/Lugh/Shell/qmldir
 
 # 3. The desktop preview in every state (it quits itself after --measure).
-for state in none launcher controlcenter notifications menu lock osd toast; do
-  run "preview --state $state" ui/shell/qml/preview.qml -- --state "$state" --measure "${wp[@]}"
+for state in none launcher "launcher --query control" controlcenter "controlcenter --page wifi" \
+             "controlcenter --page bluetooth" "controlcenter --page sound" notifications menu lock \
+             "osd --kind volume --value 0.4" "osd --kind brightness" toast; do
+  # shellcheck disable=SC2086
+  run "preview --state $state" ui/shell/qml/preview.qml -- --state $state --measure "${wp[@]}"
 done
+
+# 4. The production root (main.qml) as layer-shell windows in a headless
+#    nested KWin: must reach idle without a QML warning. Skipped without KWin.
+if command -v kwin_wayland >/dev/null; then
+  total=$((total + 1))
+  if out="$(env -u QT_QPA_PLATFORM -u QT_MESSAGE_PATTERN timeout 60 scripts/shell-run.sh --nested 2 2>&1)"; then
+    printf 'ok    main.qml (nested KWin): %s\n' "$(printf '%s\n' "$out" | grep -E 'first frame|RSS' | sed 's/shell-run: //' | paste -sd';')"
+  else
+    fails=$((fails + 1))
+    printf 'FAIL  main.qml (nested KWin)\n'
+    printf '%s\n' "$out" | sed 's/^/      /' | tail -20
+  fi
+  ((verbose)) && printf '%s\n' "$out" | sed 's/^/      | /'
+else
+  echo 'skip  main.qml (no kwin_wayland for a nested run)'
+fi
 
 echo
 if ((fails)); then
