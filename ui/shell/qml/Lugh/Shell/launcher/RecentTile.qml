@@ -1,6 +1,7 @@
-// A recent-app tile on the launcher's empty state: AppIcon 48 + name.
-// current (keyboard) = selected tint + 2 px accent ring (a shape cue, not
-// color alone); hover = hover overlay; pressed = pressed overlay.
+// A recent-app tile on the launcher's empty state: AppIcon 40 + name.
+// Hover lifts the icon, press squishes it (Squish). The keyboard-current
+// pill is drawn once by LauncherBody behind the tiles; the tile only turns
+// its name to the accent text color and weight.
 import QtQuick
 import Lugh.UI
 
@@ -16,8 +17,8 @@ Item {
 
     signal clicked(int index)
 
-    implicitWidth: 92
-    implicitHeight: 96
+    implicitWidth: 96
+    implicitHeight: 78
 
     Accessible.role: Accessible.Button
     Accessible.name: name
@@ -25,35 +26,37 @@ Item {
 
     Rectangle {
         anchors.fill: parent
+        anchors.leftMargin: 1
+        anchors.rightMargin: 1
         radius: Theme.radiusLg
-        color: tile.current ? Theme.selectedBg
-            : mouse.pressed ? Theme.pressedOverlay
-            : mouse.containsMouse ? Theme.hoverOverlay
-            : "transparent"
-        border.width: tile.current ? 2 : 0
-        border.color: Theme.accent
-        Behavior on color { ColorAnimation { duration: Theme.durMicro } }
+        color: mouse.pressed ? Theme.pressedOverlay : Theme.hoverOverlay
+        visible: !tile.current && (mouse.containsMouse || mouse.pressed)
     }
 
-    AppIcon {
+    Squish {
         id: art
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Theme.space12
-        iconName: tile.icon
-        fallbackText: tile.name
-        size: 48
-        scale: mouse.pressed && !Theme.reduceMotion ? 0.96 : 1
-        Behavior on scale { NumberAnimation { duration: Theme.durMicro } }
+        y: Theme.space8
+        pressed: mouse.pressed
+        hovered: mouse.containsMouse
+        lift: 2
+
+        AppIcon {
+            iconName: tile.icon
+            fallbackText: tile.name
+            size: 40
+        }
     }
 
     Text {
-        anchors.top: art.bottom
-        anchors.topMargin: Theme.space8
+        y: Theme.space8 + 40 + 6
         anchors.horizontalCenter: parent.horizontalCenter
         width: parent.width - Theme.space12
         horizontalAlignment: Text.AlignHCenter
         text: tile.name
-        font: Theme.typeCaption
+        font.family: Theme.fontUi
+        font.pixelSize: Theme.typeCaption.pixelSize
+        font.weight: tile.current ? Font.DemiBold : Theme.typeCaption.weight
         color: tile.current ? Theme.accentText : Theme.text
         elide: Text.ElideRight
         maximumLineCount: 1
