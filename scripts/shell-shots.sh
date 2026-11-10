@@ -6,26 +6,26 @@
 #   - otherwise with QT_QPA_PLATFORM=offscreen, which is Qt's *software*
 #     renderer: shader effects and rounded glass backdrops are missing.
 #   SHOTS_PLATFORM=nested|offscreen forces one.
-#   scripts/shell-shots.sh [out-dir=out/shots] [--width 1440 --height 900]
+#   scripts/shell-shots.sh [out-dir=out/shots] [--width 1440 --height 900 …]
+#   SHOTS_STATES="none lock" SHOTS_THEMES="dark" narrow the set.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/out/shots}"; [[ $# -gt 0 ]] && shift
+out="$(realpath -m "$out")"
 mkdir -p "$out"
 
 platform="${SHOTS_PLATFORM:-$(command -v kwin_wayland >/dev/null && echo nested || echo offscreen)}"
-if [[ "$platform" == nested ]]; then
-  sock="lugh-shots-$$"
-  kwin_wayland --virtual --no-lockscreen --socket "$sock" --width 3000 --height 2000 >/dev/null 2>&1 &
-  kwin=$!
-  trap 'kill "$kwin" 2>/dev/null || true' EXIT
-  for _ in $(seq 50); do [[ -S "${XDG_RUNTIME_DIR:?}/$sock" ]] && break; sleep 0.1; done
-  export QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY="$sock" QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-else
+if [[ "$platform" == nested && -z "${LUGH_NESTED:-}" ]]; then
+  # Again, inside the headless KWin (shell-run.sh sets LUGH_NESTED).
+  exec "$root/scripts/shell-run.sh" --nested-exec 3000x2000 -- "${BASH_SOURCE[0]}" "$out" "$@"
+fi
+if [[ "$platform" != nested ]]; then
   export QT_QPA_PLATFORM=offscreen
   echo "shell-shots: offscreen (software renderer): rounded glass and shader effects won't show" >&2
 fi
 echo "shell-shots: rendering on $platform into $out"
-states=(none launcher launcher-query controlcenter notifications menu lock osd toast)
+read -r -a states <<<"${SHOTS_STATES:-none launcher launcher-query controlcenter controlcenter-wifi controlcenter-sound notifications menu lock osd toast}"
+read -r -a themes <<<"${SHOTS_THEMES:-light dark}"
 
 # render <name> <preview args…>
 render() {
@@ -33,17 +33,22 @@ render() {
   local log
   if log="$("$root/scripts/shell-preview.sh" --screenshot "$out/$name" "$@" 2>&1)"; then
     echo "ok   $out/$name"
+    # QML warnings are part of the result.
+    printf '%s\n' "$log" | grep -E 'warning|critical|Error' | grep -v 'lugh-preview: wrote' | sed 's/^/     /' | head -5 || true
   else
     echo "FAIL $name"; printf '%s\n' "$log" | tail -5; return 1
   fi
 }
 
-# 4 renders at a time; each takes ~1.5 s.
+# 4 renders at a time; each takes ~2 s.
 pids=(); fail=0
-for theme in light dark; do
+for theme in "${themes[@]}"; do
   for state in "${states[@]}"; do
-    a=(--state "$state")
-    [[ "$state" == launcher-query ]] && a=(--state launcher --query "control panel")
+    case "$state" in
+      launcher-query) a=(--state launcher --query "control panel") ;;
+      controlcenter-*) a=(--state controlcenter --page "${state#controlcenter-}") ;;
+      *) a=(--state "$state") ;;
+    esac
     [[ "$theme" == dark ]] && a+=(--dark)
     render "$theme-$state.png" "${a[@]}" "$@" &
     pids+=($!)
