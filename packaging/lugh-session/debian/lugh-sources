@@ -1,0 +1,6 @@
+# Repo paths copied into the build tree (scripts/build-debs.sh).
+ui/shell/hypr
+ui/shell/session/lugh-session
+ui/shell/session/lugh.desktop
+docs/dev/hyprland.md
+ui/shell/session/lugh-xdg-terminals.list
