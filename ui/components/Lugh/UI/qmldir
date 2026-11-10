@@ -27,3 +27,9 @@ Dialog 1.0 Dialog.qml
 Skeleton 1.0 Skeleton.qml
 EmptyState 1.0 EmptyState.qml
 ErrorBanner 1.0 ErrorBanner.qml
+Island 1.0 Island.qml
+MorphPanel 1.0 MorphPanel.qml
+IconToggle 1.0 IconToggle.qml
+Chip 1.0 Chip.qml
+Drawer 1.0 Drawer.qml
+Squish 1.0 Squish.qml
