@@ -134,6 +134,9 @@ impl WmState {
             t.focused = focused.as_ref() == Some(&t.id);
             if t.focused {
                 t.urgent = false;
+            } else if self.toplevel(&t.id).is_some_and(|old| old.urgent) {
+                // Snapshots do not carry urgency: keep what the events said.
+                t.urgent = true;
             }
         }
         for w in &mut workspaces {
@@ -234,6 +237,7 @@ impl WmState {
                     pid: None,
                     focused: self.focused.as_ref() == Some(id),
                     urgent: false,
+                    geometry: None,
                 };
                 self.toplevels.push(t.clone());
                 out.push(WmChange::ToplevelAdded(t));
@@ -307,7 +311,7 @@ impl WmState {
             | WmEvent::MonitorRemoved { .. }
             | WmEvent::ConfigReloaded
             | WmEvent::Reconnected => self.resync = true,
-            WmEvent::Unknown { .. } => {}
+            WmEvent::Unknown { .. } | WmEvent::Disconnected => {}
         }
         out
     }
@@ -484,6 +488,7 @@ mod tests {
             pid: Some(100),
             focused: false,
             urgent: false,
+            geometry: None,
         }
     }
 
@@ -497,6 +502,7 @@ mod tests {
             x: 0,
             y: 0,
             scale: 1.0,
+            transform: 0,
             active_workspace: WorkspaceId(1),
             focused: true,
         }
