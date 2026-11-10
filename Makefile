@@ -23,9 +23,9 @@ export CONTAINER_ENGINE
 HELLO_IMAGE := localhost/lugh-hello-env:$(shell sha256sum tests/toolchain/Containerfile 2>/dev/null | cut -c1-12)
 CONTAINER_LIB := source scripts/lib/container.sh
 
-.PHONY: help iso debs repo brand-assets check hello build-env \
+.PHONY: help iso debs repo brand-assets check hello shell greeter build-env \
         run-uefi run-uefi-sb run-bios \
-        test-boot test-boot-uefi test-boot-uefi-sb test-boot-bios \
+        test-boot test-boot-uefi test-boot-uefi-sb test-boot-bios test-desktop \
         preview shots qml-check \
         clean
 
@@ -43,8 +43,14 @@ help: ## List the make targets
 iso: debs repo ## Build the live ISO -> out/lugh-<VERSION>-amd64.iso (+ .sha256, out/lugh.iso)
 	scripts/build-iso.sh
 
-debs: ## Build all .deb packages -> out/debs/
-	scripts/build-debs.sh
+debs: ## Build all .deb packages -> out/debs/ (PKGS="lugh-ui …" for some)
+	scripts/build-debs.sh $(PKGS)
+
+shell: ## Build lugh-shell (cxx-qt) in the trixie Qt container -> out/bin/lugh-shell
+	scripts/build-shell.sh
+
+greeter: ## Build lugh-greeter (cxx-qt) in the trixie Qt container -> out/bin/lugh-greeter
+	scripts/build-greeter.sh
 
 repo: ## Publish out/debs/ to the signed local apt repo -> out/repo/
 	scripts/repo-publish.sh
@@ -111,6 +117,9 @@ test-boot-uefi-sb: ## Headless boot test, UEFI + Secure Boot only
 
 test-boot-bios: ## Headless boot test, legacy BIOS only
 	scripts/test-boot.sh bios
+
+test-desktop: ## Boot the ISO to the desktop and drive it: login, launcher, lock, logout -> out/vm-shots/
+	scripts/test-desktop.sh $(ARGS)
 
 # --- cleanup -----------------------------------------------------------------
 
