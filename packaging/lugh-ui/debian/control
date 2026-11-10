@@ -1,0 +1,28 @@
+Source: lugh-ui
+Section: x11
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: lugh-ui
+Architecture: all
+Depends: fonts-inter,
+         fonts-jetbrains-mono,
+         qml6-module-qtqml,
+         qml6-module-qtqml-models,
+         qml6-module-qtqml-workerscript,
+         qml6-module-qtquick,
+         qml6-module-qtquick-controls,
+         qml6-module-qtquick-layouts,
+         qml6-module-qtquick-shapes,
+         qml6-module-qtquick-templates,
+         qml6-module-qtquick-window,
+         qt6-svg-plugins,
+         ${misc:Depends}
+Description: Lugh design system for Qt Quick (Lugh.UI)
+ The Lugh.UI QML module: theme tokens, glass panels, buttons, menus, sliders
+ and the other controls shared by the Lugh shell, the greeter and Lugh apps,
+ with the Lucide icon font. Installed as a QML import tree under
+ /usr/share/lugh/qml.
