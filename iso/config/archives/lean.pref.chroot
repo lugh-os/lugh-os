@@ -1,0 +1,8 @@
+# Build-time only: keep Recommends from dragging a second desktop into the
+# image. pcmanfm-qt recommends lxqt-policykit and lxqt-qtplugin, which pull
+# lxqt-session (an LXQt entry on the sign-in screen), its autostart entries,
+# xscreensaver and a printer applet. (lxqt-sudo and liblxqt stay: pcmanfm-qt
+# depends on them.)
+Package: lxqt-session lxqt-config lxqt-policykit lxqt-qtplugin lxqt-powermanagement lxqt-notificationd lxqt-themes lxqt-system-theme lximage-qt xdg-desktop-portal-lxqt xscreensaver xscreensaver-data xscreensaver-gl qps qlipper oxygen-icon-theme system-config-printer system-config-printer-common system-config-printer-udev galternatives
+Pin: release *
+Pin-Priority: -1
