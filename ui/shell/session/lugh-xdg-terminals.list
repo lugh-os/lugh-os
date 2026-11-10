@@ -1,0 +1,5 @@
+# Terminal preference for xdg-terminal-exec in the Lugh session
+# (-> /usr/share/xdg-terminal-exec/lugh-xdg-terminals.list). Without it
+# xdg-terminal-exec picks footclient, whose windows do not match the pinned
+# "foot" dock tile. Users override in ~/.config/lugh-xdg-terminals.list.
+foot.desktop
