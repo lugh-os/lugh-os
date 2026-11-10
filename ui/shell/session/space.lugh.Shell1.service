@@ -1,0 +1,9 @@
+# D-Bus activation for lugh-shell (installed to /usr/share/dbus-1/services/).
+# A call to space.lugh.Shell1 while the shell is down or restarting starts
+# lugh-shell.service through systemd and waits for it, so key presses made
+# during a restart are not lost. Outside a Lugh session the unit refuses to
+# start (Requisite=lugh-session.target) and the call fails cleanly.
+[D-BUS Service]
+Name=space.lugh.Shell1
+Exec=/bin/false
+SystemdService=lugh-shell.service
