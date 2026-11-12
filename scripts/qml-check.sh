@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Headless QML load check: loads every demo (LughUI incl. liquid, shell,
-# greeter), every Lugh.Shell surface and the desktop preview (each --state)
+# greeter), every Lugh.Shell surface, the desktop preview (each --state) and
+# the QtTest scenes in ui/shell/qml/tests
 # with QT_QPA_PLATFORM=offscreen, then the production root main.qml in a
 # headless nested KWin, and fails on any QML warning or error.
 # `make qml-check` runs it.
@@ -68,12 +69,22 @@ done < ui/shell/qml/Lugh/Shell/qmldir
 # 3. The desktop preview in every state (it quits itself after --measure).
 for state in none launcher "launcher --query control" controlcenter "controlcenter --page wifi" \
              "controlcenter --page bluetooth" "controlcenter --page sound" notifications menu lock \
-             "osd --kind volume --value 0.4" "osd --kind brightness" toast; do
+             "osd --kind volume --value 0.4" "osd --kind brightness" toast overview \
+             customize "customize --page panel" "customize --page quick"; do
   # shellcheck disable=SC2086
   run "preview --state $state" ui/shell/qml/preview.qml -- --state $state --measure "${wp[@]}"
 done
 
-# 4. The production root (main.qml) as layer-shell windows in a headless
+# 4. QtTest scenes under ui/shell/qml/tests (run by plain qml: no
+#    qmltestrunner needed). Each prints PASS/FAIL! lines and exits 1 on a
+#    failure; a throwaway XDG_CONFIG_HOME keeps ShellSettings off the real conf.
+for f in ui/shell/qml/tests/tst_*.qml; do
+  tmpconf="$(mktemp -d)"
+  XDG_CONFIG_HOME="$tmpconf" run "$f" "$f"
+  rm -rf "$tmpconf"
+done
+
+# 5. The production root (main.qml) as layer-shell windows in a headless
 #    nested KWin: must reach idle without a QML warning. Skipped without KWin.
 if command -v kwin_wayland >/dev/null; then
   total=$((total + 1))
