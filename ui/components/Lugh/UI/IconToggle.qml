@@ -25,6 +25,8 @@ import QtQuick.Templates as T
 T.Button {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string iconName: ""
     property string checkedIconName: ""
     property int size: 48
@@ -63,7 +65,7 @@ T.Button {
     }
 
     Accessible.role: Accessible.Button
-    Accessible.name: label + ", " + (checked ? qsTr("on") : qsTr("off"))
+    Accessible.name: (accessibleName !== "" ? accessibleName : label) + ", " + (checked ? qsTr("on") : qsTr("off"))
                      + (stateText !== "" ? ", " + stateText : "")
     Accessible.checkable: true
     Accessible.checked: checked
