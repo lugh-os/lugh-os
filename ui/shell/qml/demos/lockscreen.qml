@@ -50,6 +50,8 @@ Item {
     Shortcut { sequence: "Ctrl+L"; onActivated: Services.session.lock() }
 
     Component.onCompleted: {
+        // The repo's art (the demo runs without lugh-branding installed).
+        Services.appearance.wallpaperDir = Qt.resolvedUrl("../../../../branding/wallpapers/");
         Theme.dark = has("--dark");
         Theme.reduceMotion = has("--reduce");
         Services.keyboard.capsLock = has("--caps");
