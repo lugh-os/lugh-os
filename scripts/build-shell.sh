@@ -46,6 +46,7 @@ if [[ "$engine" == podman && "$(id -u)" != 0 ]]; then owner=0:0; else owner="$(i
 tty=(); [[ -t 0 && -t 1 ]] && tty=(-t)
 
 in_container() {
+  # shellcheck disable=SC2016  # the script expands inside the container
   "$engine" run --rm --init -i "${tty[@]}" -v "$root:/src" -w /src \
     -v lugh-hello-rustup:/root/.rustup -v lugh-hello-cargo:/root/.cargo/registry \
     -e LANG=C.UTF-8 -e CARGO_TARGET_DIR=/src/out/shell-target -e QMAKE=/usr/lib/qt6/bin/qmake \
