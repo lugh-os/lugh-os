@@ -31,6 +31,9 @@ pub enum WmChange {
     ActiveWorkspaceChanged(Option<WorkspaceId>),
     /// Keyboard focus moved to another window, or to none.
     FocusChanged(Option<WindowId>),
+    /// Another output has the focus (its connector name; empty when none
+    /// is known).
+    ActiveOutputChanged(String),
 }
 
 /// The window-manager state kept by the shell, updated incrementally.
@@ -70,6 +73,11 @@ impl WmState {
     /// Outputs.
     pub fn monitors(&self) -> &[Monitor] {
         &self.monitors
+    }
+
+    /// Connector name of the focused output (`eDP-1`); empty when unknown.
+    pub fn active_output(&self) -> &str {
+        self.focused_monitor().map_or("", |m| m.name.as_str())
     }
 
     /// Workspace on the focused monitor.
@@ -174,6 +182,12 @@ impl WmState {
         if self.focused != focused {
             out.push(WmChange::FocusChanged(focused.clone()));
         }
+        let output = monitors.iter().find(|m| m.focused).map(|m| m.name.as_str());
+        if output.unwrap_or("") != self.active_output() {
+            out.push(WmChange::ActiveOutputChanged(
+                output.unwrap_or_default().to_owned(),
+            ));
+        }
 
         self.workspaces = workspaces;
         self.toplevels = toplevels;
@@ -198,14 +212,14 @@ impl WmState {
                 self.set_active(*id, &mut out);
             }
             WmEvent::FocusedMon { monitor, workspace } => {
-                self.focus_monitor(monitor);
+                self.focus_monitor(monitor, &mut out);
                 match self.ws_by_name(workspace) {
                     Some(id) => self.set_active(id, &mut out),
                     None => self.resync = true,
                 }
             }
             WmEvent::FocusedMonV2 { monitor, workspace } => {
-                self.focus_monitor(monitor);
+                self.focus_monitor(monitor, &mut out);
                 if self.workspace(*workspace).is_none() {
                     self.resync = true;
                 }
@@ -332,9 +346,14 @@ impl WmState {
         self.monitors.iter().find(|m| m.focused)
     }
 
-    fn focus_monitor(&mut self, name: &str) {
-        if !self.monitors.iter().any(|m| m.name == name) {
-            self.resync = true;
+    fn focus_monitor(&mut self, name: &str, out: &mut Vec<WmChange>) {
+        let known = self.monitors.iter().any(|m| m.name == name);
+        if !known {
+            self.resync = true; // the resnapshot brings the new output
+        }
+        let now = if known { name } else { "" };
+        if self.active_output() != now {
+            out.push(WmChange::ActiveOutputChanged(now.to_owned()));
         }
         for m in &mut self.monitors {
             m.focused = m.name == name;
@@ -543,9 +562,13 @@ mod tests {
         assert!(matches!(changes[1], WmChange::WorkspaceAdded(_)));
         assert!(matches!(changes[2], WmChange::ToplevelAdded(_)));
         assert_eq!(
-            changes.last(),
-            Some(&WmChange::FocusChanged(Some(id("0xa"))))
+            changes[changes.len() - 2..],
+            [
+                WmChange::FocusChanged(Some(id("0xa"))),
+                WmChange::ActiveOutputChanged("eDP-1".into())
+            ]
         );
+        assert_eq!(s.active_output(), "eDP-1");
         // Same snapshot again: nothing to do.
         assert!(s.reset(state().snapshot()).is_empty());
     }
@@ -764,9 +787,13 @@ mod tests {
         });
         assert_eq!(
             c,
-            vec![WmChange::ActiveWorkspaceChanged(Some(WorkspaceId(2)))]
+            vec![
+                WmChange::ActiveOutputChanged("DP-1".into()),
+                WmChange::ActiveWorkspaceChanged(Some(WorkspaceId(2)))
+            ]
         );
         assert!(s.monitors()[1].focused && !s.monitors()[0].focused);
+        assert_eq!(s.active_output(), "DP-1");
         assert!(
             s.apply(&WmEvent::FocusedMonV2 {
                 monitor: "DP-1".into(),
