@@ -16,6 +16,8 @@ import QtQuick.Templates as T
 T.Button {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string iconName: ""
     property string tooltip: ""
     property int size: 32
@@ -49,7 +51,7 @@ T.Button {
     opacity: enabled ? 1 : Theme.disabledOpacity
 
     Accessible.role: Accessible.Button
-    Accessible.name: tooltip !== "" ? tooltip : text
+    Accessible.name: accessibleName !== "" ? accessibleName : (tooltip !== "" ? tooltip : text)
     Accessible.checkable: checkable
     Accessible.checked: checked
     Accessible.description: !enabled ? disabledReason : ""
