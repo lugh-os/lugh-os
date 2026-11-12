@@ -147,6 +147,15 @@ impl Logind {
             .await
     }
 
+    /// Takes a *block* inhibitor for idle ("Keep awake"): the idle daemon
+    /// (hypridle honours logind inhibitors) neither dims, locks nor sleeps
+    /// until the returned descriptor is dropped.
+    pub(crate) async fn inhibit_idle(&self) -> zbus::Result<OwnedFd> {
+        self.manager
+            .call("Inhibit", &("idle", "Lugh", "Keep awake is on", "block"))
+            .await
+    }
+
     pub(crate) fn connection(&self) -> &Connection {
         &self.conn
     }
