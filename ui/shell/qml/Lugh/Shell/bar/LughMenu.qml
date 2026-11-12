@@ -1,11 +1,13 @@
-// The Lugh menu (docs/design/lugh-mode.md: grows out of the logo island). A
-// fullscreen overlay root: the frame anchors it to every screen edge and maps
-// it while `shown`; it takes the keyboard while `wantsKeyboard`.
+// The Lugh menu (docs/design/lugh-mode.md: grows out of the start button of
+// the bottom Panel). A fullscreen overlay root: the frame anchors it to every
+// screen edge and maps it while `shown`; it takes the keyboard while
+// `wantsKeyboard`.
 //
 //   LughMenu { anchors.fill: parent }    // opens with ShellState.lughMenuOpen
 //
-// A MorphPanel springs from ShellState.logoIsland to a compact panel hanging
-// 6 px under it. Outside click or Esc closes it (ShellState.closeAll()).
+// A MorphPanel springs from ShellState.logoIsland (the start button) to a
+// compact panel standing 8 px above the Panel (ShellState.panelRect /
+// panelReserved), left-aligned with the button. Outside click or Esc closes it (ShellState.closeAll()).
 // Keyboard: Up/Down/Home/End/Tab move, Enter/Space activate; the first enabled
 // row is current on open.
 //
@@ -35,7 +37,11 @@ Item {
     readonly property bool canSuspend: Services.session.canSuspend
     // Known without loading the content, so the morph has its target at once.
     readonly property int panelHeight: 2 * pad + headerHeight + 2 * separatorHeight
-                                       + (canSuspend ? 7 : 6) * rowHeight
+                                       + (canSuspend ? 8 : 7) * rowHeight
+    // Bottom edge of the menu: above the panel, whichever of its rects is
+    // higher (with auto-hide the reserved zone is 0 but the panel shows).
+    readonly property real _bottom: Math.min(ShellState.logoIsland.y, ShellState.panelRect.y,
+                                             height - ShellState.panelReserved) - Theme.space8
 
     function _ask(kind) {
         ShellState.closeAll();
@@ -58,8 +64,8 @@ Item {
         anchors.fill: parent
         open: root.open
         originRect: ShellState.logoIsland
-        targetRect: Qt.rect(ShellState.logoIsland.x,
-                            ShellState.logoIsland.y + ShellState.logoIsland.height + Theme.space4 + Theme.space2,
+        targetRect: Qt.rect(Math.max(Theme.space8, Math.min(root.width - root.panelWidth - Theme.space8, ShellState.logoIsland.x)),
+                            Math.max(Theme.space8, root._bottom - root.panelHeight),
                             root.panelWidth, root.panelHeight)
         radius: Theme.radiusXl
         elevation: "popover"
@@ -73,8 +79,8 @@ Item {
                 // Index into `rows` of the keyboard/hover-current row.
                 property int current: -1
                 readonly property var rows: root.canSuspend
-                    ? [settingsRow, storeRow, lockRow, sleepRow, logoutRow, restartRow, shutdownRow]
-                    : [settingsRow, storeRow, lockRow, logoutRow, restartRow, shutdownRow]
+                    ? [settingsRow, customizeRow, storeRow, lockRow, sleepRow, logoutRow, restartRow, shutdownRow]
+                    : [settingsRow, customizeRow, storeRow, lockRow, logoutRow, restartRow, shutdownRow]
 
                 function move(step) {
                     const n = rows.length;
@@ -190,6 +196,12 @@ Item {
                         text: qsTr("Settings…")
                         iconName: "settings"
                         disabledReason: qsTr("Settings arrives in Phase 2")
+                    }
+                    Row_ {
+                        id: customizeRow
+                        text: qsTr("Customize…")
+                        iconName: "palette"
+                        onTriggered: ShellState.openCustomize("")
                     }
                     Row_ {
                         id: storeRow
