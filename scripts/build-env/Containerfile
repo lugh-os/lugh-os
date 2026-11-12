@@ -38,6 +38,21 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
+# lugh-hyprbars (packaging/lugh-hyprbars): a Hyprland plugin, built against
+# the hyprland-dev of trixie-backports, the Hyprland Lugh ships. Only the
+# Hyprland stack comes from backports (same pin as iso/config/archives).
+RUN echo 'deb http://deb.debian.org/debian trixie-backports main' \
+      > /etc/apt/sources.list.d/trixie-backports.list \
+ && printf '%s\n' 'Package: hyprland hyprland-* libhypr* libaquamarine* libxkbcommon* libxkbregistry* xkb-data' \
+      'Pin: release n=trixie-backports' 'Pin-Priority: 990' \
+      > /etc/apt/preferences.d/lugh-hyprland \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      hyprland hyprland-dev liblua5.4-dev libpixman-1-dev libdrm-dev libinput-dev \
+      libudev-dev libwayland-dev libxkbcommon-dev pkgconf \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 # rustup only. The toolchain named in rust-toolchain.toml is installed at build
 # time (`rustup toolchain install`) into the lugh-hello-rustup volume that
 # scripts/lib/container.sh mounts on /root/.rustup, so a toolchain bump does not
