@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lugh desktop preview: the whole Lugh-mode desktop (wallpaper, mock app
-# windows, islands, dock, every overlay) in one normal window. Runs anywhere
+# windows, bottom panel, every overlay) in one normal window. Runs anywhere
 # Qt 6 runs; no Hyprland needed. See ui/shell/README.md.
 #
 #   scripts/shell-preview.sh [--width 1440] [--height 900] [--dark]
@@ -19,6 +19,15 @@
 # window flashes; Qt's software renderer: no shader effects — use
 # scripts/shell-shots.sh / shell-motion.sh for the real GPU rendering).
 # --measure prints the time from process start to the first frame, then exits.
+#
+# Config: the preview runs with a throwaway XDG_CONFIG_HOME (removed on exit)
+# and passes --dev-config, so --dark/--accent/--reduce-motion are written into
+# ShellSettings (Customize shows them) without ever touching
+# ~/.config/lugh/lugh-shell.conf. Interactive runs start from a copy of that
+# file; --screenshot/--motion/--measure start from the defaults (stable
+# shots). The desktop's kdeglobals, fontconfig and GTK settings are copied
+# in, so icons and fonts look the same. LUGH_DEV_CONFIG=keep uses the real
+# config instead (the flags then only reach Theme).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 qml="$(command -v qml6 || command -v qml || echo /usr/lib/qt6/bin/qml)"
@@ -54,6 +63,22 @@ if [[ "${QT_QPA_PLATFORM:-}" == offscreen && -z "${QT_QPA_PLATFORMTHEME:-}" ]]; 
   done
 fi
 
+# Throwaway config (see the header).
+dev_cfg=""
+if [[ "${LUGH_DEV_CONFIG:-}" != keep ]]; then
+  real_cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+  dev_cfg="$(mktemp -d "${TMPDIR:-/tmp}/lugh-preview-config.XXXXXX")"
+  trap 'rm -rf "$dev_cfg"' EXIT
+  for f in kdeglobals fontconfig gtk-3.0 gtk-4.0 qt6ct; do
+    [[ -e "$real_cfg/$f" ]] && cp -r "$real_cfg/$f" "$dev_cfg/" 2>/dev/null || true
+  done
+  if ((!batch && !measure)) && [[ -f "$real_cfg/lugh/lugh-shell.conf" ]]; then
+    mkdir -p "$dev_cfg/lugh" && cp "$real_cfg/lugh/lugh-shell.conf" "$dev_cfg/lugh/"
+  fi
+  export XDG_CONFIG_HOME="$dev_cfg"
+  args+=(--dev-config)
+fi
+
 # Without lugh-branding installed, point Wallpaper at the repo's art.
 if [[ ! -d /usr/share/backgrounds/lugh ]]; then
   args+=(--wallpaper-dir "file://$root/branding/wallpapers/")
@@ -74,7 +99,11 @@ if ((measure)); then
   exit 0
 fi
 
+# No exec: the EXIT trap removes the throwaway config.
+rc=0
 if ((batch)); then
-  exec timeout 60 "${cmd[@]}"
+  timeout 60 "${cmd[@]}" || rc=$?
+else
+  "${cmd[@]}" || rc=$?
 fi
-exec "${cmd[@]}"
+exit "$rc"
