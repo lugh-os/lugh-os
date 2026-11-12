@@ -44,6 +44,77 @@ pub(crate) struct TopRow {
     pub(crate) title: String,
     pub(crate) workspace: i64,
     pub(crate) focused: bool,
+    /// Layout position relative to the origin of the window's monitor,
+    /// logical px (0 when unknown).
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    /// Size in logical px (0 when unknown).
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    /// Logical size of the window's monitor (0 when unknown).
+    #[serde(rename = "monitorWidth")]
+    pub(crate) monitor_width: i32,
+    #[serde(rename = "monitorHeight")]
+    pub(crate) monitor_height: i32,
+    /// Connector name of the window's monitor (the Qt screen name); empty
+    /// when unknown.
+    pub(crate) monitor: String,
+}
+
+/// Where a window is, for the geometry roles of a `wm.toplevels` row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Placement {
+    /// Window rectangle relative to the monitor origin, logical px.
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    /// Logical size of the monitor.
+    pub(crate) monitor_width: i32,
+    pub(crate) monitor_height: i32,
+    /// Its connector name.
+    pub(crate) monitor: String,
+}
+
+/// The window rectangle relative to the origin of the monitor its workspace
+/// lives on (else the focused monitor, else the first). Hyprland reports
+/// window and monitor positions in the global layout in logical px, and the
+/// monitor's mode in physical px ([`Monitor::logical_rect`] scales it), so
+/// the result is in logical px on scaled outputs too. Numbers are 0 and the
+/// name empty when unknown.
+pub(crate) fn toplevel_geometry(
+    t: &Toplevel,
+    workspaces: &[Workspace],
+    monitors: &[Monitor],
+) -> Placement {
+    let on = workspaces
+        .iter()
+        .find(|w| w.id == t.workspace)
+        .map(|w| w.monitor.as_str())
+        .filter(|m| !m.is_empty());
+    let mon = on
+        .and_then(|name| monitors.iter().find(|m| m.name == name))
+        .or_else(|| monitors.iter().find(|m| m.focused))
+        .or(monitors.first());
+    let Some(mon) = mon else {
+        return Placement::default();
+    };
+    let r = mon.logical_rect();
+    let g = t.geometry.unwrap_or_default();
+    let (x, y) = if t.geometry.is_some() {
+        (g.x - r.x, g.y - r.y)
+    } else {
+        (0, 0)
+    };
+    Placement {
+        x,
+        y,
+        width: g.w,
+        height: g.h,
+        monitor_width: r.w,
+        monitor_height: r.h,
+        monitor: mon.name.clone(),
+    }
 }
 
 /// `apps.installed` row.
@@ -571,6 +642,54 @@ mod tests {
             &mons,
             None
         ));
+    }
+
+    #[test]
+    fn placement_is_relative_to_the_workspace_monitor_in_logical_px() {
+        // eDP-1 1920×1080 at 0,0; DP-1 3840×2160 at scale 2 right of it,
+        // rotated 90° (1080×1920 logical), showing workspace 2.
+        let left = monitor();
+        let mut right = monitor();
+        right.name = "DP-1".into();
+        right.x = 1920;
+        right.width = 3840;
+        right.height = 2160;
+        right.scale = 2.0;
+        right.transform = 1;
+        right.focused = false;
+        let mons = [left, right];
+        let mut ws2 = ws(2, "2", 1);
+        ws2.monitor = "DP-1".into();
+        let wss = [ws(1, "1", 1), ws2];
+        assert_eq!(
+            toplevel_geometry(&win(2, Some((2020, 300, 900, 1200))), &wss, &mons),
+            Placement {
+                x: 100,
+                y: 300,
+                width: 900,
+                height: 1200,
+                monitor_width: 1080,
+                monitor_height: 1920,
+                monitor: "DP-1".into(),
+            }
+        );
+        let on_left = toplevel_geometry(&win(1, Some((40, 50, 600, 400))), &wss, &mons);
+        assert_eq!((on_left.x, on_left.monitor.as_str()), (40, "eDP-1"));
+        // Unknown workspace: the focused monitor; unknown geometry: zeros.
+        let lost = toplevel_geometry(&win(7, None), &wss, &mons);
+        assert_eq!(
+            (
+                lost.x,
+                lost.width,
+                lost.monitor_width,
+                lost.monitor.as_str()
+            ),
+            (0, 0, 1920, "eDP-1")
+        );
+        assert_eq!(
+            toplevel_geometry(&win(1, Some((1, 2, 3, 4))), &wss, &[]),
+            Placement::default()
+        );
     }
 
     #[test]
