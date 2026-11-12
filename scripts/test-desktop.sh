@@ -26,6 +26,9 @@
 #   - a root command agent on a virtio-serial port, which the image only
 #     starts when QEMU offers that port.
 # Exits non-zero when any step fails.
+#
+# Guest commands are single-quoted on purpose: they expand in the guest.
+# shellcheck disable=SC2016
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -74,6 +77,7 @@ shot() { vm shot "$SHOTS/$1" && log "  screenshot out/vm-shots/$1"; }
 now_ms() { date +%s%3N; }
 
 qemu_pid=""
+# shellcheck disable=SC2329  # called from the traps below
 stop_vm() {
   ((keep)) && return 0
   [[ -n "$qemu_pid" ]] || return 0
@@ -130,6 +134,41 @@ wait_layer() {
     (( $(date +%s) < deadline )) || return 1
     sleep 0.4
   done
+}
+
+# active_ws: id of the focused workspace.
+active_ws() { gu 'hyprctl -j activeworkspace' | tr -d '\r' | python3 -c 'import json,sys; t=sys.stdin.read(); print(json.loads(t[t.index("{"):t.rindex("}")+1])["id"])'; }
+# win_fits <class regex> [title regex]: the newest matching window lies inside
+# its monitor's usable area (monitor minus the reserved panel strip, with room
+# for a server-side title bar above it when it has one). Prints the geometry.
+# shellcheck disable=SC2329  # run through check()
+win_fits() {
+  local json
+  json="$(gu 'hyprctl -j monitors; echo @@SPLIT@@; hyprctl -j clients; echo @@SPLIT@@; hyprctl -j layers; echo @@SPLIT@@; hyprctl plugin list 2>/dev/null')" || { echo "hyprctl failed"; return 1; }
+  python3 - "$1" "${2:-.}" "$json" <<'PY'
+import json, re, sys
+cls, title, raw = sys.argv[1], sys.argv[2], sys.argv[3].replace("\r", "")
+mons, clients, layers, plugins = raw.split("@@SPLIT@@")[:4]
+mons, clients, layers = json.loads(mons), json.loads(clients), json.loads(layers)
+win = [c for c in clients if re.search(cls, c.get("class", ""), re.I) and re.search(title, c.get("title", ""), re.I) and c.get("mapped", True)]
+if not win:
+    print(f"no window of class {cls}"); sys.exit(1)
+c = min(win, key=lambda c: c.get("focusHistoryID", 99))
+m = next(m for m in mons if m["id"] == c["monitor"])
+s = m.get("scale", 1) or 1
+lw, lh = m["width"] / s, m["height"] / s
+if m.get("transform", 0) % 2: lw, lh = lh, lw
+l, t, r, b = m.get("reserved", [0, 0, 0, 0])
+x0, y0, x1, y1 = m["x"] + l, m["y"] + t, m["x"] + lw - r, m["y"] + lh - b
+# the panel's own layer: its top edge (the reserved strip is what Hyprland uses)
+dock = [v for mon in layers.values() for lvl in mon["levels"].values() for v in lvl if v.get("namespace") == "lugh-dock"]
+bar = 26 if "hyprbars" in plugins else 0
+(x, y), (w, h) = c["at"], c["size"]
+print(f"{c['class']} at {x},{y} size {w}x{h}; usable {x0:.0f},{y0:.0f}-{x1:.0f},{y1:.0f} (reserved {l},{t},{r},{b}); "
+      f"panel layer {[(d['x'], d['y'], d['w'], d['h']) for d in dock]}; floating {c.get('floating')}")
+ok = x >= x0 - 1 and y - bar >= y0 - 1 and x + w <= x1 + 1 and y + h <= y1 + 1 and b > 0
+sys.exit(0 if ok else 1)
+PY
 }
 
 mkdir -p "$SHOTS" "$LOGS" "$VMDIR"
@@ -190,7 +229,14 @@ shot 01-desktop.png
 check "session: user lugh, wayland" "" g 'loginctl list-sessions --no-legend | grep -w lugh >/dev/null && [ "$(loginctl show-user lugh -p State --value)" = active ]'
 check "lugh-shell.service active" "" gu 'systemctl --user is-active --quiet lugh-shell.service'
 check "D-Bus space.lugh.Shell1" "" gu 'busctl --user introspect space.lugh.Shell1 /space/lugh/Shell1 space.lugh.Shell1 | grep -q ToggleControlCenter'
-check "bar, dock, wallpaper mapped" "" gu 'l=$(hyprctl layers); for n in lugh-bar lugh-dock lugh-wallpaper; do echo "$l" | grep -q "namespace: $n" || { echo "missing $n"; exit 1; }; done'
+check "panel, wallpaper mapped" "" gu 'l=$(hyprctl layers); for n in lugh-dock lugh-wallpaper; do echo "$l" | grep -q "namespace: $n" || { echo "missing $n"; exit 1; }; done'
+check "no old top bar (lugh-bar) layer" "" gu '! hyprctl layers | grep -q "namespace: lugh-bar\b"'
+check "panel reserves the bottom edge" "" gu 'hyprctl -j monitors | tr -d " \n" | grep -Eq "\"reserved\":\[[0-9]+,[0-9]+,[0-9]+,[1-9][0-9]*\]"'
+if g 'test -e /usr/lib/lugh/hyprland/hyprbars.so'; then
+  check "hyprbars plugin loaded" "" gu 'hyprctl plugin list | grep -qi hyprbars'
+else
+  record "hyprbars plugin loaded" skip "lugh-hyprbars not installed"
+fi
 renderer="$(gu 'grep -m1 "\]: Renderer: " "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" | sed "s/.*Renderer: //"' 2>/dev/null | tr -d '\r' | head -n1)"
 low_power="$(gu 'if systemctl --user show-environment | grep -q "^LUGH_LOW_POWER=1"; then echo on; else echo off; fi' 2>/dev/null | tr -d '\r' | tail -n1)"
 record "renderer" pass "${renderer:-unknown}; low power: ${low_power:-?}"
@@ -225,6 +271,34 @@ check "notify-send accepted" "" gu 'notify-send -a "Lugh test" "Hello from the t
 if wait_layer lugh-notifications mapped 10; then record "notification toast shown" pass ""; else record "notification toast shown" FAIL "no lugh-notifications layer"; fi
 sleep 1; shot 06-toast.png
 sleep 6
+
+# --- 15/16/17 overview, workspaces, panel keyboard focus --------------------------
+key meta_l-tab
+if wait_layer lugh-overview mapped; then record "Super+Tab opens the overview" pass ""; else record "Super+Tab opens the overview" FAIL "no lugh-overview layer"; fi
+sleep 1.2; shot 15-overview.png
+key esc
+if wait_layer lugh-overview gone; then record "Esc closes the overview" pass ""; else record "Esc closes the overview" FAIL "lugh-overview still mapped"; fi
+
+ws_before="$(active_ws 2>/dev/null)"
+key ctrl-meta_l-right; sleep 1
+ws_after="$(active_ws 2>/dev/null)"
+if [[ "$ws_after" == 2 ]]; then record "Super+Ctrl+Right: workspace 2" pass "$ws_before -> $ws_after"
+else record "Super+Ctrl+Right: workspace 2" FAIL "active workspace $ws_before -> ${ws_after:-?}"; fi
+shot 16-workspace-2.png
+key ctrl-meta_l-left; sleep 1
+ws_back="$(active_ws 2>/dev/null)"
+if [[ "$ws_back" == 1 ]]; then record "Super+Ctrl+Left: back to 1" pass ""; else record "Super+Ctrl+Left: back to 1" FAIL "active workspace ${ws_back:-?}"; fi
+
+# Super+B gives the panel the keyboard with the start button focused; Enter
+# then opens the Lugh menu, which proves where the keyboard went.
+key meta_l-b; sleep 0.8
+shot 17-panel-focus.png
+key ret
+if wait_layer lugh-menu mapped 5; then record "Super+B, Enter: panel has the keyboard" pass "Enter on the start button opened lugh-menu"
+else record "Super+B, Enter: panel has the keyboard" FAIL "Enter after Super+B opened no lugh-menu (see 17-panel-focus.png)"; fi
+sleep 1; shot 17b-panel-enter.png
+key esc; wait_layer lugh-menu gone 4 || { key esc; wait_layer lugh-menu gone 4 || true; }
+key esc; sleep 0.5
 
 # --- 07/08 lock -----------------------------------------------------------------
 locked() { gu 'hyprctl layers | grep -q "namespace: lugh-lock"'; }
@@ -269,6 +343,27 @@ else
   record "Ctrl+Alt+T: foot in an app-lugh scope" FAIL "no foot window after 20s"
 fi
 sleep 1; shot 11-foot.png
+if gu 'hyprctl plugin list' 2>/dev/null | grep -qi hyprbars; then
+  check "foot has a Lugh title bar" "" gu 'hyprctl decorations class:foot | grep -qi bar'
+fi
+key meta_l-up; sleep 1.2
+check "Super+Up: maximized foot above the panel" "" win_fits '^foot$'
+shot 18-foot-maximized.png
+key meta_l-up; sleep 0.8
+key meta_l-left; sleep 1.2
+check "Super+Left: snapped foot above the panel" "" win_fits '^foot$'
+shot 19-foot-snapped.png
+# An app asking for far more than the screen gets clamped into the usable area.
+gu 'setsid -f foot --title lugh-huge -W 400x150 >/dev/null 2>&1' >/dev/null 2>&1 || true
+if wait_guest 15 'as-user "hyprctl clients" | grep -q "title: lugh-huge"'; then
+  sleep 1.2
+  check "huge floating window clamped" "" win_fits '^foot$' '^lugh-huge$'
+else
+  record "huge floating window clamped" FAIL "the 400x150-cell foot did not open"
+fi
+shot 20-huge-clamped.png
+gu 'hyprctl dispatch "hl.dsp.window.close({ window = \"title:^lugh-huge$\" })"' >/dev/null 2>&1 || true
+sleep 0.5
 
 # Firefox through the launcher: Super+Space, "fire", Enter.
 key meta_l-spc; wait_layer lugh-launcher mapped || true
@@ -279,6 +374,20 @@ else
   record "launcher starts Firefox in a scope" FAIL "no Firefox window after $((90 * slow))s"
 fi
 sleep 6; shot 12-firefox.png
+if gu 'hyprctl plugin list' 2>/dev/null | grep -qi hyprbars; then
+  check "Firefox draws its own frame (no Lugh bar)" "" gu '! hyprctl decorations class:firefox | grep -qi bar'
+fi
+# Files (pcmanfm-qt, Qt 6) through Super+E: decorated by the compositor.
+key meta_l-e
+if wait_guest $((30 * slow)) 'as-user "hyprctl clients" | grep -qi "class: pcmanfm-qt"'; then
+  sleep 2; record "Super+E opens Files" pass ""
+  if gu 'hyprctl plugin list' 2>/dev/null | grep -qi hyprbars; then
+    check "Files (Qt 6) has a Lugh title bar" "" gu 'hyprctl decorations class:pcmanfm-qt | grep -qi bar'
+  fi
+else
+  record "Super+E opens Files" FAIL "no pcmanfm-qt window"
+fi
+shot 21-files.png
 
 # Volume key -> the island OSD.
 vol_before="$(gu 'pactl get-sink-volume @DEFAULT_SINK@ | grep -o "[0-9]*%" | head -n1' | tr -d '\r')"
@@ -291,10 +400,10 @@ sleep 2
 
 if ms="$(kill_shell)" && [[ "$ms" =~ ^[0-9]+$ ]]; then
   sleep 1
-  if gu 'c=$(hyprctl clients); echo "$c" | grep -qi "class: foot" && echo "$c" | grep -qi "class: firefox"' && layer_mapped lugh-bar; then
+  if gu 'c=$(hyprctl clients); echo "$c" | grep -qi "class: foot" && echo "$c" | grep -qi "class: firefox"' && layer_mapped lugh-dock; then
     record "shell restarts after SIGKILL" pass "first frame ${ms} ms after the kill; foot and Firefox kept running"
   else
-    record "shell restarts after SIGKILL" FAIL "back after ${ms} ms, but an app or the bar is missing"
+    record "shell restarts after SIGKILL" FAIL "back after ${ms} ms, but an app or the panel is missing"
   fi
 else
   record "shell restarts after SIGKILL" FAIL "no new first frame 15s after the kill"
@@ -302,7 +411,7 @@ fi
 sleep 1; shot 14-after-shell-restart.png
 gu 'for a in $(hyprctl clients -j | grep -o "\"address\": \"[^\"]*\"" | cut -d\" -f4); do hyprctl dispatch "hl.dsp.window.close({ window = \"address:$a\" })"; done' >/dev/null 2>&1 || true
 sleep 1
-g 'pkill -u lugh -x firefox; pkill -u lugh -x foot; true' >/dev/null 2>&1 || true
+g 'pkill -u lugh -x firefox; pkill -u lugh -x foot; pkill -u lugh -x pcmanfm-qt; true' >/dev/null 2>&1 || true
 sleep 4
 
 # Numbers: RSS, idle CPU over 10 s, session memory.
@@ -320,9 +429,9 @@ record "lugh-shell at idle" pass "CPU ${idle:-?} over 10 s, RSS ${rss:-?}"
 
 # QML errors in the shell's log so far.
 gu 'journalctl --user -b -u lugh-shell --no-pager -o cat' >"$LOGS/lugh-shell.log" 2>&1 || true
-qml_errors=$(grep -acE '\.qml:[0-9]+.*(Error|is not defined|Cannot|Unable|binding loop)|module ".*" is not installed' "$LOGS/lugh-shell.log" || true)
-if (( qml_errors == 0 )); then record "no QML errors in the shell log" pass ""; else
-  record "no QML errors in the shell log" FAIL "$qml_errors line(s), see out/vm-logs/lugh-shell.log"; fi
+qml_errors=$(grep -acE '\.(qml|js):[0-9]+|module ".*" is not installed|QML [A-Za-z]+: ' "$LOGS/lugh-shell.log" || true)
+if (( qml_errors == 0 )); then record "no QML warnings in the shell log" pass ""; else
+  record "no QML warnings in the shell log" FAIL "$qml_errors line(s), see out/vm-logs/lugh-shell.log"; fi
 
 # --- 09 log out -> greeter ------------------------------------------------------
 n_greeter=$(marker_count "LUGH-MARK: greeter-ready")
