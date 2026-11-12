@@ -18,6 +18,16 @@
 //!   `gsettings` (colour scheme and a GTK theme hint), in the background and
 //!   best-effort. Outside one (a developer running the shell core on another
 //!   desktop) the host desktop's settings are left alone.
+//! - The window title-bar buttons are mirrored the same way, to
+//!   `org.gnome.desktop.wm.preferences button-layout` (GTK 3/4, libadwaita,
+//!   Firefox and Qt's Adwaita decoration read it): always on the right, in
+//!   the order of `[shell] titlebarButtons` in `lugh-shell.conf` (written by
+//!   the shell's settings), `minimize,maximize,close` by default. It is
+//!   applied at start, on theme changes and on every `reload()`.
+//! - Hyprland's own title bars (lugh-hyprbars, styled by
+//!   `/usr/share/lugh/hypr/lugh/titlebars.lua` from `desktop.toml` and
+//!   `[shell] titlebarButtons`) are re-styled with
+//!   `hyprctl reload config-only` when the theme or the buttons change.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -35,6 +45,8 @@ const NAME: &str = "appearance";
 pub fn start(ctx: &Context) -> Box<dyn Service> {
     let service = AppearanceService::new(ctx.clone(), DesktopConfig::default_path().ok());
     let dark = service.view().dark;
+    // The compositor read both files itself when it loaded its config.
+    service.remember_title_bars(dark);
     service.mirror_theme(dark);
     Box::new(service)
 }
@@ -171,6 +183,10 @@ struct AppearanceService {
     changes: Mutex<()>,
     /// `gsettings`, when mirroring applies (see the module docs).
     gsettings: Option<Arc<PathBuf>>,
+    /// `hyprctl`, inside a Lugh session on Hyprland (see the module docs).
+    hyprctl: Option<Arc<PathBuf>>,
+    /// Theme and button layout the compositor's title bars last got.
+    title_bars: Mutex<Option<(bool, String)>>,
 }
 
 fn find_in_path(program: &str) -> Option<PathBuf> {
@@ -203,6 +219,52 @@ fn mirror_commands(dark: bool) -> [[&'static str; 4]; 2] {
     ]
 }
 
+/// Title-bar buttons when the shell's settings name none (or none valid).
+const DEFAULT_BUTTONS: &str = "minimize,maximize,close";
+
+/// `[shell] titlebarButtons` from the text of `lugh-shell.conf` (a QSettings
+/// INI file, which quotes values that contain commas).
+fn titlebar_buttons(conf: &str) -> Option<String> {
+    let mut in_shell = false;
+    let mut found = None;
+    for line in conf.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_shell = line == "[shell]";
+        } else if in_shell
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim() == "titlebarButtons"
+        {
+            found = Some(value.trim().trim_matches('"').to_owned());
+        }
+    }
+    found
+}
+
+/// The GTK `button-layout` for a `titlebarButtons` value: the known buttons,
+/// in order, once each, on the right (the application menu, if any, left).
+fn button_layout(buttons: Option<&str>) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    for b in buttons.unwrap_or(DEFAULT_BUTTONS).split(',').map(str::trim) {
+        if matches!(b, "minimize" | "maximize" | "close") && !kept.contains(&b) {
+            kept.push(b);
+        }
+    }
+    if kept.is_empty() {
+        return format!("appmenu:{DEFAULT_BUTTONS}");
+    }
+    format!("appmenu:{}", kept.join(","))
+}
+
+/// `~/.config/lugh/lugh-shell.conf` (honours `XDG_CONFIG_HOME`).
+fn shell_conf_path(home: Option<&Path>) -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| home.map(|h| h.join(".config")))?;
+    Some(base.join("lugh").join("lugh-shell.conf"))
+}
+
 impl AppearanceService {
     fn new(ctx: Context, path: Option<PathBuf>) -> Self {
         let seen = path.as_deref().and_then(mtime);
@@ -210,6 +272,11 @@ impl AppearanceService {
             .then(|| find_in_path("gsettings"))
             .flatten()
             .map(Arc::new);
+        let hyprctl = (in_lugh_session()
+            && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some())
+        .then(|| find_in_path("hyprctl"))
+        .flatten()
+        .map(Arc::new);
         Self {
             ctx,
             path,
@@ -217,6 +284,8 @@ impl AppearanceService {
             seen: Mutex::new(seen),
             changes: Mutex::new(()),
             gsettings,
+            hyprctl,
+            title_bars: Mutex::new(None),
         }
     }
 
@@ -252,6 +321,10 @@ impl AppearanceService {
     /// Returns whether it was read.
     fn reload(&self) -> bool {
         let _order = self.changes.lock();
+        // The shell's own settings file may have changed the buttons.
+        let layout = self.button_layout_command();
+        self.sync_title_bars(self.view().dark, &layout[3]);
+        self.run_gsettings(vec![layout]);
         let Some(path) = self.path.as_deref() else {
             return false;
         };
@@ -281,15 +354,83 @@ impl AppearanceService {
         true
     }
 
-    /// Tells GTK apps about the theme. Fire and forget.
+    /// The `gsettings` invocation for the title-bar buttons, from the
+    /// shell's settings file as it is now.
+    fn button_layout_command(&self) -> [String; 4] {
+        let conf = shell_conf_path(self.home.as_deref())
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default();
+        [
+            "set".into(),
+            "org.gnome.desktop.wm.preferences".into(),
+            "button-layout".into(),
+            button_layout(titlebar_buttons(&conf).as_deref()),
+        ]
+    }
+
+    /// Tells GTK apps about the theme and the title-bar buttons.
     fn mirror_theme(&self, dark: bool) {
+        let mut commands: Vec<[String; 4]> = mirror_commands(dark)
+            .iter()
+            .map(|c| c.map(str::to_owned))
+            .collect();
+        let layout = self.button_layout_command();
+        self.sync_title_bars(dark, &layout[3]);
+        commands.push(layout);
+        self.run_gsettings(commands);
+    }
+
+    /// Records what the compositor's title bars show now.
+    fn remember_title_bars(&self, dark: bool) {
+        let layout = self.button_layout_command()[3].clone();
+        match self.title_bars.lock() {
+            Ok(mut tb) => *tb = Some((dark, layout)),
+            Err(poisoned) => *poisoned.into_inner() = Some((dark, layout)),
+        }
+    }
+
+    /// Re-styles Hyprland's title bars when the theme or the buttons differ
+    /// from what they last got (a config reload: the Lua config reads both
+    /// files). Fire and forget, like the gsettings mirror.
+    fn sync_title_bars(&self, dark: bool, layout: &str) {
+        let Some(hyprctl) = self.hyprctl.clone() else {
+            return;
+        };
+        let wanted = Some((dark, layout.to_owned()));
+        {
+            let mut tb = match self.title_bars.lock() {
+                Ok(tb) => tb,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if *tb == wanted {
+                return;
+            }
+            *tb = wanted;
+        }
+        self.ctx.runtime.spawn(async move {
+            let run = tokio::process::Command::new(hyprctl.as_path())
+                .args(["reload", "config-only"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .status();
+            match tokio::time::timeout(std::time::Duration::from_secs(5), run).await {
+                Ok(Ok(status)) if status.success() => {}
+                other => tracing::debug!(?other, "hyprctl reload for title bars skipped"),
+            }
+        });
+    }
+
+    /// Runs `gsettings` invocations in order. Fire and forget.
+    fn run_gsettings(&self, commands: Vec<[String; 4]>) {
         let Some(gsettings) = self.gsettings.clone() else {
             return;
         };
         self.ctx.runtime.spawn(async move {
-            for args in mirror_commands(dark) {
+            for args in commands {
                 let run = tokio::process::Command::new(gsettings.as_path())
-                    .args(args)
+                    .args(&args)
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -445,6 +586,33 @@ mod tests {
         assert_eq!(mirror_commands(true)[1][3], "Adwaita-dark");
     }
 
+    #[test]
+    fn titlebar_buttons_are_read_from_the_shell_section() {
+        let conf = "[general]\ntitlebarButtons=close\n\n[shell]\nfoo=1\ntitlebarButtons=\"close,minimize\"\n";
+        assert_eq!(titlebar_buttons(conf).as_deref(), Some("close,minimize"));
+        assert_eq!(
+            titlebar_buttons("[shell]\ntitlebarButtons=close\n").as_deref(),
+            Some("close")
+        );
+        assert_eq!(titlebar_buttons("[general]\ntitlebarButtons=close\n"), None);
+        assert_eq!(titlebar_buttons(""), None);
+    }
+
+    #[test]
+    fn button_layout_keeps_known_buttons_on_the_right() {
+        assert_eq!(button_layout(None), "appmenu:minimize,maximize,close");
+        assert_eq!(button_layout(Some("close")), "appmenu:close");
+        assert_eq!(
+            button_layout(Some(" maximize , close,close ")),
+            "appmenu:maximize,close"
+        );
+        assert_eq!(
+            button_layout(Some("menu:spacer")),
+            "appmenu:minimize,maximize,close"
+        );
+        assert_eq!(button_layout(Some("")), "appmenu:minimize,maximize,close");
+    }
+
     /// A service over a config file in a temp dir. Calls that save go to the
     /// default path, so only `reload` and the pure parts are exercised with
     /// files here; `change` is tested through a context whose save target is
@@ -474,6 +642,7 @@ mod tests {
         };
         let mut svc = AppearanceService::new(ctx, Some(path));
         svc.gsettings = None; // never touch the host desktop from tests
+        svc.hyprctl = None;
         (svc, rx, dir, rt)
     }
 
