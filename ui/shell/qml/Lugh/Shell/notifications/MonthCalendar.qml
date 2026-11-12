@@ -1,10 +1,19 @@
-// Compact month calendar for the notification center: month title, a "Today"
-// chip when away from the current month, previous / next, weekday initials
-// (locale's first day of week) and 28 px day cells with tabular numerals.
-// Only the weeks the month needs are shown (4–6): the panel glides when that
-// changes. Today is an accent circle with bold Theme.onAccent numerals (not
-// color alone). Read-only: days are not interactive.
-// Internal to notifications/ (not exported in the qmldir).
+// Compact month calendar (notification center, quick panel): month title, a
+// "Today" chip when away from the current month, previous / next, weekday
+// initials (locale's first day of week) and `cellHeight` px day cells with
+// tabular numerals. Only the weeks the month needs are shown (4–6): the
+// height glides when that changes. Today is an accent circle with bold
+// Theme.onAccent numerals (not color alone). Read-only: days are not
+// interactive.
+//
+// `collapsible` adds a chevron that folds the grid to the current week
+// (`collapsed`; month navigation hides while folded). The chevron only emits
+// `foldToggled()`: the owner decides `collapsed` (the quick panel binds it to
+// the saved choice plus its auto-fit). `heightFor(folded)` is the height the
+// calendar rests at either way (for an owner fitting its layout); `animate`
+// gates the height glide (off while the owner pops open).
+// Internal to notifications/ (not exported in the qmldir); the quick panel
+// imports it by path.
 import QtQuick
 import Lugh.UI
 import Lugh.Shell
@@ -24,8 +33,16 @@ Rectangle {
     property date viewMonth: new Date(_year, _month, 1)
     readonly property bool onCurrentMonth: viewMonth.getFullYear() === _year && viewMonth.getMonth() === _month
     readonly property int firstDay: Qt.locale().firstDayOfWeek % 7   // 0 = Sunday
-    readonly property int cellHeight: 28
-    readonly property int pad: Theme.space8
+    property int cellHeight: 28
+    property int pad: Theme.space8
+    property bool collapsible: false
+    property bool collapsed: false
+    property bool animate: true
+    property bool _ready: false
+
+    signal foldToggled()
+    Component.onCompleted: _ready = true
+    onCollapsedChanged: if (collapsed) reset()
 
     function reset() { viewMonth = new Date(_year, _month, 1); }
     function shift(months) { viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + months, 1); }
@@ -34,8 +51,19 @@ Rectangle {
     readonly property var cells: {
         const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
         const lead = (new Date(y, m, 1).getDay() - firstDay + 7) % 7;
-        const weeks = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7);
+        const weeks = monthWeeks;
         const out = [];
+        if (collapsed && collapsible) {
+            // Just the week holding today.
+            const t = new Date(_year, _month, todayKey % 100);
+            const back = (t.getDay() - firstDay + 7) % 7;
+            for (let i = 0; i < 7; ++i) {
+                const d = new Date(_year, _month, t.getDate() - back + i);
+                out.push({ day: d.getDate(), inMonth: d.getMonth() === _month,
+                           key: d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate(), date: d });
+            }
+            return out;
+        }
         for (let i = 0; i < weeks * 7; ++i) {
             const d = new Date(y, m, 1 - lead + i);
             out.push({ day: d.getDate(), inMonth: d.getMonth() === m,
@@ -44,7 +72,22 @@ Rectangle {
         return out;
     }
 
-    implicitHeight: pad + 28 + Theme.space2 + 20 + (cells.length / 7) * cellHeight + pad
+    // Weeks the shown month needs (4–6).
+    readonly property int monthWeeks: {
+        const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
+        const lead = (new Date(y, m, 1).getDay() - firstDay + 7) % 7;
+        return Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7);
+    }
+    function heightFor(folded) {
+        return pad + 28 + Theme.space2 + 20 + (folded && collapsible ? 1 : monthWeeks) * cellHeight + pad;
+    }
+
+    implicitHeight: heightFor(collapsed)
+    Behavior on implicitHeight {
+        enabled: root._ready && root.animate && !Theme.reduceMotion
+        NumberAnimation { duration: Theme.durSmall; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard }
+    }
+    clip: true
     radius: Theme.radiusLg
     color: fill
     border.width: 1
@@ -76,13 +119,14 @@ Rectangle {
             anchors.rightMargin: Theme.space4
             anchors.verticalCenter: parent.verticalCenter
             text: qsTr("Today")
-            opacity: root.onCurrentMonth ? 0 : 1
+            opacity: root.onCurrentMonth || root.collapsed ? 0 : 1
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: Theme.dur(Theme.durSmall) } }
             onClicked: root.reset()
         }
         IconButton {
             id: prev
+            visible: !root.collapsed
             anchors.right: next.left
             anchors.verticalCenter: parent.verticalCenter
             iconName: "chevron-left"
@@ -93,13 +137,26 @@ Rectangle {
         }
         IconButton {
             id: next
-            anchors.right: parent.right
+            visible: !root.collapsed
+            anchors.right: fold.left
             anchors.verticalCenter: parent.verticalCenter
             iconName: "chevron-right"
             tooltip: qsTr("Next month")
             size: 28
             iconSize: 16
             onClicked: root.shift(1)
+        }
+        IconButton {
+            id: fold
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.collapsible
+            width: visible ? implicitWidth : 0
+            iconName: root.collapsed ? "chevron-down" : "chevron-up"
+            tooltip: root.collapsed ? qsTr("Show the whole month") : qsTr("Show this week only")
+            size: 28
+            iconSize: 16
+            onClicked: root.foldToggled()
         }
     }
 
