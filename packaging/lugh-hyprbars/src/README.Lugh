@@ -1,0 +1,24 @@
+Vendored sources of lugh-hyprbars
+=================================
+
+hyprbars/   hyprland-plugins, commit 3aa21f2e0ca72412f1b434c3126f8f1fec3c716c
+            (hyprpm.toml pins it for Hyprland 0.55.0 .. 0.55.4; 0.55.2 is
+            Hyprland commit 39d7e209). Upstream files unchanged except:
+            - main.cpp: the "Lugh" block before onNewWindow(): a bar only on
+              X11 windows that want a frame and on Wayland windows that bound
+              xdg-decoration without asking for client-side mode; windows that
+              asked for client-side get that mode (Hyprland itself always
+              answers server-side) and draw their own title bar.
+            - main.cpp newLuaButton(): set userfg, so the Lua fg_color of a
+              button is used (upstream ignores it and picks black/white).
+            - Makefile/CMake/meson/nix files dropped (debian/rules builds it).
+hyprutils/  hyprutils v0.13.1 headers (include/) + LICENSE. Debian's Hyprland
+            0.55.2+ds-1~bpo13+1 links libhyprutils.so.12 (0.13.1), but
+            trixie-backports' libhyprutils-dev is 0.14.x, whose smart-pointer
+            headers don't match that ABI (the plugin doesn't even compile
+            against them).
+
+Updating for a new Hyprland: take the plugin commit hyprpm.toml pins for that
+Hyprland commit, the hyprutils headers of the libhyprutils.so.N that
+Hyprland's binary links (`ldd /usr/bin/Hyprland`), re-apply the main.cpp
+block, and move the hyprland-dev range in debian/control.
