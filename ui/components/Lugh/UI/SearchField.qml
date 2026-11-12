@@ -14,6 +14,8 @@ import QtQuick.Templates as T
 T.TextField {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property bool large: false
     property bool busy: false
 
@@ -49,7 +51,7 @@ T.TextField {
     opacity: enabled ? 1 : Theme.disabledOpacity
 
     Accessible.role: Accessible.EditableText
-    Accessible.name: placeholderText
+    Accessible.name: accessibleName !== "" ? accessibleName : placeholderText
     Accessible.description: busy ? qsTr("Searching") : ""
 
     Keys.onEscapePressed: event => {
