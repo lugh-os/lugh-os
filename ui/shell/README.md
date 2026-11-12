@@ -1,7 +1,8 @@
 # lugh-shell (QML)
 
-The Lugh desktop shell: bar, dock, launcher, control center, notifications,
-lock screen and wallpaper, written in QML (Qt 6.8) and shown as
+The Lugh desktop shell: bottom panel, launcher, quick panel (clock, calendar,
+controls), notifications, workspace overview, Customize, lock screen and
+wallpaper, written in QML (Qt 6.8) and shown as
 wlr-layer-shell surfaces on Hyprland. The Rust host (`ui/shell/src`, cxx-qt)
 loads `main.qml` and attaches the real backend to `Services`. Spec:
 [docs/specs/shell.md](../../docs/specs/shell.md); look and feel:
@@ -25,10 +26,12 @@ ui/shell/qml/
 └── Lugh/Shell/              # the Lugh.Shell QML module
     ├── qmldir
     ├── Services.qml         # system state: mock by default, live after attach(backend)
-    ├── ShellState.qml       # which overlay is open, island rects
+    ├── ShellState.qml       # which overlay is open, panel/tray rects
+    ├── ShellSettings.qml    # user settings (~/.config/lugh/lugh-shell.conf), edited by Customize
     ├── backend/WsBackend.qml  # dev backend over WebSocket (lugh-shell-devd)
-    ├── wallpaper/  bar/  dock/  launcher/  controlcenter/
-    └── notifications/  lockscreen/
+    ├── wallpaper/  panel/  launcher/  controlcenter/ (quick panel)
+    ├── overview/  customize/  notifications/  lockscreen/
+    └── bar/ (Lugh menu)  dock/ (panel app items)
 ```
 
 Shared components come from `Lugh.UI` in `ui/components/` (contract:
@@ -72,7 +75,7 @@ scripts/shell-preview.sh [--width 1440] [--height 900] [--dark]
 Every argument is passed through to `preview.qml`.
 
 - `--state` opens that overlay at start. `toast` posts two notifications;
-  `osd` shows the OSD in the center island; `lock` locks (password `lugh`
+  `osd` shows the OSD in the panel tray; `lock` locks (password `lugh`
   unlocks on the mock).
 - `--screenshot` waits for loads and open animations, saves the PNG and quits.
 - `--measure` prints the time from process start to the first frame and quits.
@@ -80,11 +83,10 @@ Every argument is passed through to `preview.qml`.
 - `--wallpaper-dir` is added by the scripts when `lugh-branding` isn't
   installed, so the wallpaper comes from `branding/wallpapers/`.
 
-Keys: **Meta+Space** or **Ctrl+Space** launcher · **Ctrl+C** control center ·
-**Ctrl+N** notifications · **Ctrl+L** lock · **Ctrl+D** toggle dark · **Esc**
+Keys: **Meta+Space** or **Ctrl+Space** launcher · **Ctrl+C** quick panel ·
+**Ctrl+N** notifications · **Ctrl+Tab** overview · **Ctrl+,** Customize · **Ctrl+L** lock · **Ctrl+D** toggle dark · **Esc**
 closes. Clicking a mock window raises and focuses it; the title bar drags it.
-Mock windows stay below the islands' zone (`Theme.barExclusiveZone`) and above
-the dock.
+Mock windows stay above the bottom panel.
 
 ### Preview on the real backend
 
@@ -103,7 +105,7 @@ stays on the mock. (Check the devd crate's README for its exact run command.)
 
 `scripts/shell-shots.sh` renders light + dark × `none launcher launcher-query
 controlcenter controlcenter-wifi controlcenter-sound notifications menu lock
-osd toast`. Narrow with `SHOTS_STATES="none lock" SHOTS_THEMES=dark`.
+osd toast overview customize customize-panel`. Narrow with `SHOTS_STATES="none lock" SHOTS_THEMES=dark`.
 
 `scripts/shell-motion.sh` shows how the liquid motion looks without a human
 at the screen. For each of `launcher controlcenter notifications osd toast`
@@ -120,16 +122,14 @@ separate runs: a hitch that only one run had shows as a frame out of step.
 `main.qml` and `preview.qml` compose the surfaces through these properties
 only. Every surface is created by name (`Qt.createComponent("Lugh.Shell",
 type)`), so a missing or broken surface logs one warning and the rest of the
-shell still runs. There is no `Osd` surface: the bar's center island is the
-OSD.
+shell still runs. There is no `Osd` surface: the panel's tray is the OSD.
 
 | Surface | Root size | Exposes | Layer · anchors · zone · keyboard · namespace |
 |---|---|---|---|
 | `Wallpaper` | fills parent | `dark`, `blurred`, `source` | background · all 4 · −1 · none · `lugh-wallpaper` (every screen) |
-| `Bar` | width = screen (set by the frame), `implicitHeight: Theme.barHeight` (52) | `exclusiveZone` (48; `Theme.barExclusiveZone` when absent), `inputRects` (the three islands); publishes `ShellState.logoIsland/centerIsland/statusIsland` in scene coordinates | top · top+left+right · `exclusiveZone` · none · `lugh-bar` (every screen) |
-| `Dock` | full width, `implicitHeight` includes transparent headroom | `exclusiveZone`, `inputRect`, `menuOpen` | top · bottom+left+right · `exclusiveZone` · on-demand while `menuOpen`, else none · `lugh-dock` (every screen) |
-| `LughMenu`, `Launcher`, `ControlCenter`, `NotificationCenter` | fill the screen; the surface draws a `MorphPanel` growing out of its island and closes on outside click via `ShellState` | `shown` (open **or** animating out), `wantsKeyboard` | overlay · all 4 · −1 · exclusive while `wantsKeyboard`, else none · `lugh-menu`, `lugh-launcher`, `lugh-controlcenter`, `lugh-notification-center` (active screen) |
-| `NotificationPopups` | `implicitWidth` × `implicitHeight` | `shown`, `inputRects` | overlay · top+right · 0 · none · `lugh-notifications` (active screen); `Theme.barHeight` from the top and 10 px from the right, as transparent padding inside the window |
+| `Panel` | width = screen (set by the frame), `implicitHeight` includes transparent headroom | `exclusiveZone`, `inputRect`, `inputRects` (preferred), `menuOpen`, `screenHeight` and `publish` (set by the frame), `focusPanel()`; the publishing panel writes `ShellState.logoIsland/centerIsland/statusIsland/panelRect/panelReserved` in screen coordinates | top · bottom+left+right · `exclusiveZone` · on-demand while `menuOpen`, else none · `lugh-dock` (every screen) |
+| `LughMenu`, `Launcher`, `ControlCenter`, `NotificationCenter`, `Overview`, `Customize` | fill the screen; the surface draws its panel (scaling up out of what opened it) and closes on outside click via `ShellState` | `shown` (open **or** animating out), `wantsKeyboard` | overlay · all 4 · −1 · exclusive while `wantsKeyboard`, else none · `lugh-menu`, `lugh-launcher`, `lugh-controlcenter`, `lugh-notification-center`, `lugh-overview`, `lugh-customize` (active screen) |
+| `NotificationPopups` | `implicitWidth` × `implicitHeight` | `shown`, `inputRects` | overlay · top+right · 0 · none · `lugh-notifications` (active screen); 10 px from the top and the right, as transparent padding inside the window |
 | `LockScreen` | fills the screen | `shown`, `wantsKeyboard` | overlay · all 4 · −1 · exclusive · `lugh-lock` (every screen; the primary one takes the keyboard) |
 
 How `main.qml` wires it:
@@ -137,8 +137,8 @@ How `main.qml` wires it:
 - **Backend.** `if (typeof LughBackend !== "undefined" && LughBackend)
   Services.attach(LughBackend)` runs before any surface is created. With plain
   `qml6` the mock `Services` stays.
-- **Start-up.** Wallpaper, Bar and Dock are created synchronously; on the
-  bar's first `frameSwapped` the frame calls `Services.shell.ready()` once;
+- **Start-up.** Wallpaper and Panel are created synchronously; on the
+  panel's first `frameSwapped` the frame calls `Services.shell.ready()` once;
   the other surfaces follow one per idle turn (or at once when asked for).
   `--lazy-overlays` creates an overlay on its first open instead. If
   `Services.session.locked` is already true at start, the lock windows are
@@ -147,17 +147,45 @@ How `main.qml` wires it:
   `wantsKeyboard` the frame activates it; the surface focuses its own field.
 - **Input regions.** When the `LughNative` context object exists the frame
   calls `LughNative.setInputRegion(window, [rect, …])` (window coordinates) at
-  most once per frame: bar = `inputRects`; dock = `inputRect`, or the whole
+  most once per frame: panel = `inputRects` (else `inputRect`), or the whole
   window while `menuOpen`; toasts = `inputRects` shifted by the padding.
   Without it (qml6) the transparent parts take clicks.
 - **Low power.** While `Services.shell.lowPower` is true the frame sets
   `Theme.transparency = false` and `Theme.reduceMotion = true`, and restores
   the user's values when it clears (a change the user makes meanwhile wins).
-- **Screens.** Wallpaper, Bar, Dock and LockScreen exist per screen, tracked by
-  name, so hot-plug adds or removes only that screen's windows. Overlays and
-  toasts go to the screen the compositor considers active.
+- **Screens.** Wallpaper, Panel and LockScreen exist per screen, tracked by
+  name, so hot-plug adds or removes only that screen's windows; each sits at
+  its output's origin (Qt moves a window at (0, 0) to the first screen).
+  Overlays and toasts go to the screen the compositor considers active. Only
+  the panel on the active output (`Services.wm.activeOutput`; "" or unknown →
+  the first screen) publishes `ShellState` geometry, in output-local
+  coordinates (each overlay window covers its own output).
+- **Keyboard.** Super+B (`space.lugh.Shell1.FocusPanel` →
+  `ShellState.focusPanelRequested`): the active output's panel enters
+  keyboard mode, its window becomes keyboard-exclusive and is activated, the
+  start button takes focus (focus ring). Arrows / Home / End / Tab move,
+  Enter / Space activate, Menu / Shift+F10 open the context menu, Esc (or
+  activating anything, or an overlay opening) gives the keyboard back and the
+  compositor refocuses the previous window. A context menu opened with the
+  pointer makes the window keyboard on-demand. The preview binds Ctrl+B.
+- **Auto-hide.** `ShellSettings.panelAutohide`: exclusive zone 0, the pill
+  slides off while a window overlaps it, a 4 px edge strip takes the pointer.
+  `ShellState.panelReserved` stays the panel's height + margin: every overlay
+  reveals the panel, so overlays always stand above it.
 - **Dev flags** after `--`: `--dark`, `--accent <name>`, `--reduce-motion`,
-  `--wallpaper-dir <url/>`, `--lazy-overlays`, `--no-media`, `--idle-report <s>`.
+  `--dev-config`, `--wallpaper-dir <url/>`, `--lazy-overlays`, `--no-media`,
+  `--idle-report <s>`. In the source tree the wallpaper dir defaults to the
+  repo's `branding/wallpapers/`, set before any image loads.
+- **Dev config.** `scripts/shell-preview.sh` (so `shell-shots.sh` and
+  `shell-motion.sh`) and `scripts/shell-run.sh --nested` run on a throwaway
+  `XDG_CONFIG_HOME` (removed on exit) and pass `--dev-config`: the
+  appearance flags are then written into `ShellSettings`, so Customize shows
+  what the screen shows (a dark preview says "Dark"), and
+  `~/.config/lugh/lugh-shell.conf` is never written. Interactive previews
+  start from a copy of it, renders from the defaults; `kdeglobals`,
+  fontconfig and GTK settings are copied in. On Hyprland, `shell-run.sh`
+  does the same only when an appearance flag is given.
+  `LUGH_DEV_CONFIG=keep` uses the real config (flags then only reach Theme).
 
 ## LayerShellQt QML API
 
@@ -180,8 +208,8 @@ What `main.qml` does about it:
   `wantsToBeOnActiveScreen = true` when the property exists, else set
   `screenConfiguration = ScreenFromCompositor` (feature-detected at runtime, so
   neither version warns).
-- No `margins`: the toasts carry their offsets (`Theme.barHeight` from the
-  top, 10 px from the right) as transparent padding inside the window, and
+- No `margins`: the toasts carry their offsets (10 px from the top and the
+  right) as transparent padding inside the window, and
   their input region excludes it.
 - Per-screen windows set `Window.screen` (LayerShellQt's default
   `ScreenFromQWindow` honours it). Screens are tracked by name, so hot-plugging
@@ -212,11 +240,12 @@ would blur them too). Production never loads the blurred copy.
 
 Budget: first frame ≤ 400 ms, RSS ≤ 150 MB, zero CPU when idle. Method,
 numbers and hot spots: [docs/dev/shell-performance.md](../../docs/dev/shell-performance.md).
-In short (2026-11-10, Intel UHD 630 under Mesa, headless nested KWin, loaded
-dev host): idle is clean (0 frames and ≤ 10 ms CPU in 10 s with nothing
-playing), RSS is 185 MB (67 anonymous + 118 file-backed; an empty Qt Quick
-window is 104–118 MB here) and the first frame takes 0.7–1.3 s (empty window:
-0.4 s). While music plays the bar's equalizer keeps the bar window at ~57 fps.
+In short (2026-11-11, bottom Panel, Intel UHD 630 under Mesa, headless nested
+KWin, heavily loaded dev host): idle is clean (0 frames and ≤ 10 ms CPU in
+10 s with nothing playing; 15 frames in 5 s while music plays, the tray's
+equalizer stepping every 320 ms), RSS is 213 MB (92 anonymous + 121
+file-backed; 171 MB with `--lazy-overlays`; an empty Qt Quick window is
+104–118 MB here) and the first frame takes ~1.0 s (empty window: 0.4 s).
 
 ```
 scripts/shell-run.sh --nested 10 -- --no-media
