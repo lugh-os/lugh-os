@@ -12,15 +12,17 @@ Depends: adwaita-icon-theme,
          brightnessctl,
          dbus-bin,
          dbus-user-session,
+         dconf-gsettings-backend,
          foot,
          gnome-keyring,
+         gsettings-desktop-schemas,
          hyprland (>= 0.55),
          lugh-shell (>= ${source:Version}),
          pipewire-pulse,
          pkexec,
          playerctl,
          polkitd,
-         qt6-wayland,
+         qt6-wayland (>= 6.8),
          systemd,
          wireplumber,
          xdg-desktop-portal,
@@ -28,11 +30,21 @@ Depends: adwaita-icon-theme,
          xdg-desktop-portal-hyprland,
          xdg-terminal-exec,
          ${misc:Depends}
-Recommends: hyprland-guiutils, libpam-gnome-keyring, pcmanfm-qt, xwayland
+Recommends: fonts-inter,
+            hyprland-guiutils,
+            libpam-gnome-keyring,
+            lugh-hyprbars,
+            pcmanfm-qt,
+            xwayland
 Description: Lugh desktop session
  The Wayland session of Lugh OS: the lugh-session launcher and its entry in
  /usr/share/wayland-sessions, the Lugh configuration of the Hyprland
  compositor (/usr/share/lugh/hypr: look, animations, rules, keybindings,
- helper scripts) and the xdg-desktop-portal backend selection.
+ helper scripts), the xdg-desktop-portal backend selection, and the
+ Lugh defaults of GTK and foot (/usr/share/lugh/xdg, first in
+ XDG_CONFIG_DIRS inside the session) and Chromium (/etc/chromium.d/lugh).
+ .
+ Title bars for apps that rely on the compositor for them (foot, mpv, Qt,
+ X11 apps) come from lugh-hyprbars (recommended).
  .
  Hyprland comes from trixie-backports.
