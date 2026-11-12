@@ -15,7 +15,16 @@
 #   … -- --dark --accent teal            # args after -- go to main.qml
 #
 # It refuses to start outside Hyprland without --force/--nested: on another
-# desktop (KDE, GNOME) it would put a second bar and dock on the live session.
+# desktop (KDE, GNOME) it would put a second panel on the live session.
+#
+# Config: --nested runs the shell with a throwaway XDG_CONFIG_HOME (defaults,
+# removed on exit) and passes --dev-config, so the dev flags --dark,
+# --accent, --reduce-motion land in ShellSettings for that run only. On
+# Hyprland/--force the real config is used, unless one of those flags is
+# given: then a throwaway copy of ~/.config/lugh/lugh-shell.conf (changes
+# made in Customize during that run are dropped). kdeglobals, fontconfig and
+# GTK settings are copied in. LUGH_DEV_CONFIG=keep always uses the real
+# config (the flags then only reach Theme).
 #
 # Environment:
 #   LUGH_NESTED_GPU=mesa|default   nested KWin + clients on Mesa (the Intel/AMD
@@ -87,6 +96,26 @@ fi
 qml_args=("$@")
 [[ -d /usr/share/backgrounds/lugh ]] || qml_args+=(--wallpaper-dir "file://$root/branding/wallpapers/")
 
+# ---- throwaway config (see the header) ------------------------------------------
+dev_cfg=""
+use_dev_config() {
+  local seed="$1" real_cfg="${XDG_CONFIG_HOME:-$HOME/.config}" f
+  [[ "${LUGH_DEV_CONFIG:-}" == keep ]] && return 0
+  dev_cfg="$(mktemp -d "${TMPDIR:-/tmp}/lugh-shell-config.XXXXXX")"
+  for f in kdeglobals fontconfig gtk-3.0 gtk-4.0 qt6ct; do
+    [[ -e "$real_cfg/$f" ]] && cp -r "$real_cfg/$f" "$dev_cfg/" 2>/dev/null || true
+  done
+  if ((seed)) && [[ -f "$real_cfg/lugh/lugh-shell.conf" ]]; then
+    mkdir -p "$dev_cfg/lugh" && cp "$real_cfg/lugh/lugh-shell.conf" "$dev_cfg/lugh/"
+  fi
+  export XDG_CONFIG_HOME="$dev_cfg"
+  qml_args+=(--dev-config)
+}
+appearance_flags=0
+for a in "${qml_args[@]}"; do
+  case "$a" in --dark|--accent|--reduce-motion) appearance_flags=1 ;; esac
+done
+
 # ---- environment (the lugh-shell unit sets the same; docs/dev/shell-performance.md)
 export QT_QPA_PLATFORM=wayland
 # Layer surfaces never get decorations; skip loading the decoration plugin.
@@ -95,7 +124,7 @@ export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 # trixie's Qt 6.8 defaults to anyway. Pin it so drivers can't flip it.
 export QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-opengl}"
 # Threaded render loop (Qt's default on Mesa): each mapped window renders and
-# animates on its own thread, so a busy GUI thread never drops dock/launcher
+# animates on its own thread, so a busy GUI thread never drops panel/launcher
 # frames. QSG_RENDER_LOOP=basic trades that for fewer threads/contexts.
 export QSG_RENDER_LOOP="${QSG_RENDER_LOOP:-threaded}"
 # glibc creates up to 8×cores malloc arenas, one per render thread: cap them.
@@ -116,20 +145,31 @@ build_cmd() {
   fi
 }
 
+# run_live: the shell on the live compositor (no exec while a throwaway
+# config has to be removed afterwards).
+run_live() {
+  ((appearance_flags)) && use_dev_config 1
+  build_cmd "${qml_args[@]}"
+  [[ -z "$dev_cfg" ]] && exec "${cmd[@]}"
+  trap 'rm -rf "$dev_cfg"' EXIT
+  rc=0; "${cmd[@]}" || rc=$?
+  exit "$rc"
+}
+
 case "$mode" in
   hyprland)
     if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
       echo "shell-run: not in a Hyprland session; use --nested (headless test) or --force." >&2
       exit 2
     fi
-    build_cmd "${qml_args[@]}"
-    exec "${cmd[@]}" ;;
+    run_live ;;
   force)
-    build_cmd "${qml_args[@]}"
-    exec "${cmd[@]}" ;;
+    run_live ;;
   nested)
-    trap 'kill "${shell_pid:-}" 2>/dev/null || true; stop_nested' EXIT
+    trap 'kill "${shell_pid:-}" 2>/dev/null || true; stop_nested; [[ -n "$dev_cfg" ]] && rm -rf "$dev_cfg"; true' EXIT
     start_nested "$nested_size"
+    # After start_nested: the nested KWin keeps the real config.
+    use_dev_config 0
     export QT_MESSAGE_PATTERN='%{type}: %{message}'
     build_cmd "${qml_args[@]}" --idle-report "$nested_secs"
     log="$(mktemp)"
