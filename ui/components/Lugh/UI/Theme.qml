@@ -21,6 +21,9 @@ QtObject {
     // Follows Settings → Accessibility and the system flag. Movement becomes
     // short cross-fades (DESIGN-SYSTEM §5).
     property bool reduceMotion: false
+    // Global motion speed (Settings → Appearance, 0.5 snappy … 1.5 relaxed):
+    // dur() multiplies by it and the spring presets below are retimed by it.
+    property real animationScale: 1.0
     // Shell glass on/off (Settings → Appearance → transparency). When false,
     // glass surfaces use their opaque fallback.
     property bool transparency: true
@@ -93,9 +96,15 @@ QtObject {
     // ---- shadows (§4: 3 levels, soft and neutral) --------------------------
     // For MultiEffect: shadowBlur 0..1, shadowVerticalOffset px, shadowColor.
     readonly property color shadowColor: Qt.rgba(0, 0, 0, dark ? 0.45 : 0.16)
-    readonly property var elevationMenu:    ({ blur: 0.35, y: 2,  opacity: dark ? 0.40 : 0.14 })
-    readonly property var elevationPopover: ({ blur: 0.6,  y: 6,  opacity: dark ? 0.45 : 0.16 })
-    readonly property var elevationWindow:  ({ blur: 0.9,  y: 12, opacity: dark ? 0.50 : 0.18 })
+    // `opacity` is the peak alpha a Shadow puts on screen outside its shape
+    // (the baked images are normalized to it). Shadow caps it at
+    // shadowAlphaMax: the compositor blurs behind every layer pixel whose
+    // alpha is above the Hyprland `ignore_alpha` of the glass layer rules
+    // (0.5), so a darker shadow would grow a blurred copy of the shape.
+    readonly property real shadowAlphaMax: 0.28
+    readonly property var elevationMenu:    ({ blur: 0.35, y: 2,  opacity: dark ? 0.22 : 0.12 })
+    readonly property var elevationPopover: ({ blur: 0.6,  y: 6,  opacity: dark ? 0.24 : 0.14 })
+    readonly property var elevationWindow:  ({ blur: 0.9,  y: 12, opacity: dark ? 0.26 : 0.16 })
 
     // ---- typography (§3) --------------------------------------------------
     readonly property string fontUi: "Inter"
@@ -146,26 +155,30 @@ QtObject {
     readonly property int durMedium: 240
     readonly property int durLarge: 300
     readonly property int durReduced: 100
-    // Duration for a transition that moves or scales things. Under reduce
+    // Duration for any transition, scaled by animationScale. Under reduce
     // motion, callers should also skip the movement and only fade.
-    function dur(ms) { return reduceMotion ? durReduced : ms }
+    function dur(ms) { return reduceMotion ? durReduced : Math.round(ms * animationScale) }
+    // Springs are retimed by animationScale (stiffness / s², damping / s keeps
+    // the curve's shape and stretches it in time by s), clamped to 0.5–2 so
+    // the SpringAnimation integration stays stable.
+    readonly property real _springTime: Math.max(0.5, Math.min(2, animationScale))
     // cubic-bezier(0.2, 0, 0, 1) for fades and most property animations:
     //   easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
     readonly property var easeStandard: [0.2, 0, 0, 1, 1, 1]
     // Spring (stiffness 400, damping 32) for movement, as SpringAnimation params.
-    readonly property real springSpring: 6.0
-    readonly property real springDamping: 0.42
+    readonly property real springSpring: 6.0 / (_springTime * _springTime)
+    readonly property real springDamping: Math.min(0.95, 0.42 / _springTime)
     readonly property real springEpsilon: 0.25
 
     // ---- liquid motion (docs/design/lugh-mode.md §2) ----------------------
     // SpringAnimation presets. liquid: morphs, reflow, magnify (soft, a hint
     // of overshoot). snappy: toggles, squish release, small state changes.
     //   SpringAnimation { spring: Theme.liquidSpring; damping: Theme.liquidDamping; mass: Theme.liquidMass; epsilon: Theme.springEpsilon }
-    readonly property real liquidSpring: 3.2
-    readonly property real liquidDamping: 0.34
+    readonly property real liquidSpring: 3.2 / (_springTime * _springTime)
+    readonly property real liquidDamping: Math.min(0.95, 0.34 / _springTime)
     readonly property real liquidMass: 1.0
-    readonly property real snappySpring: 5.5
-    readonly property real snappyDamping: 0.46
+    readonly property real snappySpring: 5.5 / (_springTime * _springTime)
+    readonly property real snappyDamping: Math.min(0.95, 0.46 / _springTime)
     readonly property real snappyMass: 0.8
     readonly property real squishScale: 0.96
     // Island geometry.
