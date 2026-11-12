@@ -9,7 +9,7 @@ Everything the user sees on the desktop that isn't an app window: bar, dock or t
 ## User stories
 
 - **Windows switcher:** "In Classic mode I press the Windows key and get a Start menu. The taskbar, tray, Alt+Tab and snapping work the way I'm used to. Typing 'control panel' opens Settings."
-- **macOS-minded user:** "Lugh mode has a top bar, a centered dock, Spotlight-style search and smooth gestures."
+- **macOS-minded user:** "Lugh mode has one bottom panel, Spotlight-style search, a workspace overview and smooth gestures."
 - **Linux power user:** "Focus mode is tiling with a thin bar, fully keyboard-driven, and every shortcut is mine to change in `desktop.toml`."
 - **Minimal user:** "The shell uses little memory and nothing in it phones home."
 
@@ -38,8 +38,9 @@ Everything the user sees on the desktop that isn't an app window: bar, dock or t
 
 | Component | Lugh | Classic | Focus | Phase |
 |---|---|---|---|---|
-| Top bar (app menu area, clock, status, tray) | ✓ | — | thin variant | 1 |
-| Dock (pinned + running, indicators, magnify optional) | ✓ | — | — | 1 |
+| Bottom panel (start, workspaces, pinned + running apps, tray + clock) | ✓ | — | thin top bar | 1 |
+| Quick panel (clock, calendar, toggles, sliders, media, notifications) | ✓ | — | — | 1 |
+| Customize (advanced shell settings) | ✓ | — | — | 1 |
 | Taskbar (Start button, pinned, running, tray, clock) | — | ✓ | — | 2 |
 | Start menu (pinned grid, all apps, search, user, power) | — | ✓ | — | 2 |
 | Launcher / Spotlight (centered search) | ✓ | (inside Start) | runner variant | 1 |
@@ -55,17 +56,18 @@ Everything the user sees on the desktop that isn't an app window: bar, dock or t
 | Greeter | ✓ | ✓ | ✓ | 1 |
 | Desktop icons | — | optional | — | 5 (open question) |
 
-### Top bar
-- Left: logo menu (About, Settings, Store, Lock, Log out, Restart, Shut down), then the active app's name. A global menu is **not** planned: Wayland lacks a standard for it, and most toolkits no longer export menus reliably.
-- Center (Focus) or right (Lugh): workspaces indicator.
-- Right: tray, keyboard layout (if > 1), network, volume, battery, clock. Clicking any status item opens the control center. Clicking the clock opens the notification center plus a calendar.
-
-### Dock (Lugh mode)
-- Pinned apps, a divider, running unpinned apps, a divider, Downloads stack, Trash.
-- Running indicator: a dot under the icon (plus a count badge for multiple windows; never color alone).
-- Click: launch, focus, or cycle that app's windows. Middle-click: new window. Right-click: windows list, "Keep in Dock", "Quit", desktop actions from the `.desktop` file (e.g. "New Private Window").
-- Optional auto-hide and magnify. Minimize animates into the icon (on Phase 5 via `lugh_window_v1.set_minimize_rect`).
+### Bottom panel (Lugh mode)
+One panel along the bottom edge (floating pill or full-width strip, `ShellSettings`); the former top bar and dock are gone.
+- Left: start button (Lugh menu: About, Settings, Store, Customize…, Lock, Log out, Restart, Shut down; right-click → Customize), optional search button (launcher), workspace grid indicator (click → overview; wheel / PageUp/PageDown switch).
+- Middle: pinned apps, running unpinned apps, Trash. Running indicator: a dot under the icon (plus a count badge for multiple windows; never color alone). Click: launch, focus, or cycle that app's windows. Right-click: windows list, "Pin to Panel", "Quit", desktop actions from the `.desktop` file. Optional auto-hide and magnify. A global menu is **not** planned: Wayland lacks a standard for it.
+- Right: tray (keyboard layout if > 1, network, volume, battery; each item can be hidden) and the clock (time over date). Clicking it opens the **quick panel**: clock + calendar (foldable to one week), toggle tiles (order editable in place), volume/brightness, now playing, the newest notifications. Volume/brightness OSDs show in the tray.
+- Right-click on empty panel space: Customize Panel…, Auto-hide, Floating, Magnify Icons, alignment.
+- Keyboard: Super+B (D-Bus `FocusPanel`) gives the panel the keyboard with a focus ring on the start button; arrows, Home/End and Tab move, Enter/Space activate, Menu/Shift+F10 open the context menu, Esc (or activating an item) gives the keyboard back.
+- Multi-monitor: one panel per output; overlays follow the focused output (`wm.activeOutput`).
 - Bridge apps show their Windows icon. Quarantined apps show a shield badge.
+
+### Customize
+A full-screen sheet (from the panel menu, the start menu or the quick panel's gear) with search and seven sections: Appearance, Panel (live preview), Clock & tray, Quick panel, Workspaces (rows × cols grid, wrap), Windows (title-bar buttons), Motion (reduce motion, speed). Every control writes `~/.config/lugh/lugh-shell.conf` (`ShellSettings`) and applies live.
 
 ### Taskbar + Start menu (Classic mode)
 - Taskbar: Start button, search box (opens Start in search state), pinned and running buttons (grouped per app, thumbnail preview on hover from Phase 5), tray, clock + date, notification bell, show desktop corner.
@@ -96,7 +98,7 @@ Keys: ↑/↓ select, Enter open, Ctrl+Enter open the file's location / app deta
 - Privacy: content is hidden on the lock screen by default (count only).
 
 ### Control center
-Tiles: Wi-Fi (list + connect, via NetworkManager), Bluetooth (BlueZ), Airplane mode, Do Not Disturb, Dark mode, Night light, Power profile, Screen record, Keyboard layout. Sliders: volume (with an output device picker; per-app volumes in an expanded view through PipeWire), microphone, brightness (logind `SetBrightness`). Also: battery state, media player (MPRIS) with controls, and a user row (Settings, Lock, Power).
+Tiles: Wi-Fi (list + connect, via NetworkManager), Bluetooth (BlueZ), Airplane mode, Do Not Disturb, Dark mode, Night light, Power profile, Keep awake, Screen record, Keyboard layout. Keep awake holds a logind `idle` block inhibitor (`session.setIdleInhibit(on)` / `session.idleInhibited`); if logind refuses, the tile stays off and `session.lastError` says why. In Lugh mode these live in the quick panel, which shrinks to fit the screen (tighter spacing, then a folded calendar, then fewer notifications) instead of scrolling. Sliders: volume (with an output device picker; per-app volumes in an expanded view through PipeWire), microphone, brightness (logind `SetBrightness`). Also: battery state, media player (MPRIS) with controls, and a user row (Settings, Lock, Power).
 
 ### OSDs
 Centered-bottom pill, 1.2 s. Kinds: volume, brightness, mic mute, caps lock, keyboard layout, mode switch ("Classic mode"), airplane mode. Announced to screen readers.
@@ -108,7 +110,7 @@ Implements `org.freedesktop.PolicyKit1.AuthenticationAgent` (via `polkit-qt6-1`,
 Alt+Tab / Alt+Shift+Tab across all windows of the current workspace (configurable to all workspaces). Alt+\` cycles windows of the same app. Phase 1 shows icons + titles. Phase 5 shows live thumbnails through `ext-image-copy-capture` (toplevel source).
 
 ### Workspace overview
-- Lugh: Super+Tab or a 4-finger swipe up gives a Mission Control-style overview of all windows plus a workspace strip. Drag windows between workspaces.
+- Lugh: workspaces form a rows × cols grid (default 2 × 2, set in Customize). Super+Tab (or a 4-finger swipe up) opens a KDE-style overview of the grid with each workspace's windows and a search filter. Drag windows between workspaces. Windows on workspaces past the grid (and the active one, if it is past the grid) show in an "Other workspaces" strip under it. Super+Ctrl+arrows go to the neighbouring workspace; adding Shift takes the focused window along. Super+scroll steps through the grid in order and wraps only when *Wrap* is on; from past the grid it returns to the grid's last workspace. Shrinking the grid drops persistence from the workspaces it no longer covers; their windows stay and show in the strip.
 - Classic: Task View (Super+Tab) with the same data in a Windows layout.
 - Focus: optional, off by default.
 - Phase 2 on Hyprland: static grid built from Hyprland IPC with no thumbnails. Phase 5: live and gesture-driven.
@@ -143,10 +145,10 @@ ui/shell/
 │   └── models/              # Qt models exposed to QML
 └── qml/
     ├── modes/ Lugh.qml Classic.qml Focus.qml   # composition of components per mode
-    ├── components/ Bar Dock Taskbar StartMenu Launcher NotificationCenter ControlCenter OSD AltTab Overview LockScreen PolkitDialog
+    ├── components/ Panel Taskbar StartMenu Launcher NotificationCenter ControlCenter OSD AltTab Overview Customize LockScreen PolkitDialog
     └── (uses LughUI from ui/components/)
 ```
-Surfaces use LayerShellQt (`layer-shell-qt`): bar/dock/taskbar on the `top` layer with exclusive zones; launcher, control center and overview on `overlay` with keyboard interactivity `exclusive` or `on_demand`.
+Surfaces use LayerShellQt (`layer-shell-qt`): panel/taskbar on the `top` layer with exclusive zones; launcher, control center and overview on `overlay` with keyboard interactivity `exclusive` or `on_demand`.
 
 ### Window-manager backend contract (trait `WindowManagerBackend`)
 ```rust
@@ -167,7 +169,7 @@ trait WindowManagerBackend {
 | Toplevels | `wlr-foreign-toplevel-management` + Hyprland event socket (`.socket2.sock`) for workspace/monitor info | `ext-foreign-toplevel-list` + `lugh_window_v1` |
 | Workspaces | `hyprctl -j workspaces` + events | `ext-workspace-v1` |
 | apply_mode | writes `~/.config/lugh/generated/hyprland-<mode>.conf` (layout, gaps, rounding, animations, binds), then `hyprctl reload` | `lugh_shell_manager_v1.set_mode` |
-| Window buttons side | client-side only: sets GTK `gtk-decoration-layout` and the portal Settings key. Qt apps follow where supported. **Not consistent across toolkits (known limit)** | server-side decorations drawn by the compositor, consistent |
+| Title bars, window buttons side | apps that leave the frame to the compositor (foot, kitty, mpv, Qt 5/6, X11, Chromium with "use system title bar") get Lugh's `hyprbars` build (`lugh-hyprbars`, 26 px, buttons in `[shell] titlebarButtons` order); GTK 3/4, libadwaita, Firefox and apps that ask for client-side decorations draw their own, with `gtk-decoration-layout` and the portal Settings key set from the same order. Tied to one Hyprland build (see `docs/dev/hyprland.md`) | server-side decorations drawn by the compositor, consistent |
 | Quarantine marks | not available (Shield shows a notification + tray badge instead) | `lugh_window_v1.quarantine` event, border drawn by compositor |
 | Thumbnails | none | `ext-image-copy-capture` |
 
@@ -221,6 +223,7 @@ Actions use the namespaces `shell.*`, `wm.*`, `session.*` and `exec`. Phases 1�
 | Search / launcher | Super+Space | Super (tap) | Super+Space |
 | Start menu | n/a | Super (tap) / Ctrl+Esc | n/a |
 | Overview / Task View | Super+Tab, 4-finger up | Super+Tab | Super+Tab (if on) |
+| Focus the panel / taskbar | Super+B | Super+B | n/a |
 | Switch windows | Alt+Tab | Alt+Tab | Alt+Tab |
 | Same-app windows | Alt+\` | n/a | Alt+\` |
 | Close window | Super+Q / Alt+F4 | Alt+F4 | Super+Q |
@@ -229,8 +232,8 @@ Actions use the namespaces `shell.*`, `wm.*`, `session.*` and `exec`. Phases 1�
 | Snap left / right | Super+← / → | Super+← / → | move focus (Super+H/J/K/L or arrows) |
 | Move window in tiling | Super+Shift+arrows | n/a | Super+Shift+H/J/K/L |
 | Toggle tiling on workspace | Super+T | n/a | (always tiling) Super+V float toggle |
-| Workspace 1–9 | Ctrl+1..9, 3-finger swipe | Ctrl+Super+←/→ | Super+1..9 |
-| Move window to workspace | Ctrl+Shift+1..9 | Ctrl+Super+Shift+←/→ | Super+Shift+1..9 |
+| Workspace 1–9 | Ctrl+1..9, Super+Ctrl+arrows (grid), Super+scroll, 3-finger swipe | Ctrl+Super+←/→ | Super+1..9 |
+| Move window to workspace | Ctrl+Shift+1..9, Super+Ctrl+Shift+arrows | Ctrl+Super+Shift+←/→ | Super+Shift+1..9 |
 | Terminal | Ctrl+Alt+T | Ctrl+Alt+T | Super+Return |
 | Files | Super+E | Super+E | Super+E |
 | Settings | Super+, | Super+I | Super+, |
