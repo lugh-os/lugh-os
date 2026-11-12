@@ -20,6 +20,13 @@
 // uncached, from the smallest file that covers it: 2560×1600 up to 2560 device
 // pixels wide, 3840×2160 up to 3840, 5120×2880 beyond. Two layers exist only to cross-fade; once a fade ends the hidden
 // layer's source is cleared, so one full-size texture stays resident.
+//
+// Resize / scale change: the shown layer is never reloaded in place (that
+// would blank it while decoding). It keeps covering the screen, scaled, and
+// once the size has been still for 250 ms the art is decoded at the new size
+// into the other layer and cross-faded in. Theme / wallpaper changes
+// cross-fade the same way: the old image stays fully opaque under the new
+// one until the new one is covering, so no empty or black frame shows.
 // `blurred` uses the small pre-blurred file (960×540, cached, scaled up
 // smoothly) instead of a runtime blur shader.
 import QtQuick
@@ -50,8 +57,21 @@ Item {
     property bool _useRepo: false        // set when the system copy fails to load
     property bool _customFailed: false   // set when source/Services path fails
     readonly property real _dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    readonly property int _pxW: Math.ceil(width * _dpr)
-    readonly property int _pxH: Math.ceil(height * _dpr)
+    readonly property int _wantW: Math.ceil(width * _dpr)
+    readonly property int _wantH: Math.ceil(height * _dpr)
+    // The decode size: follows _want*, debounced while the size changes.
+    property int _pxW: 0
+    property int _pxH: 0
+    on_WantWChanged: _sizeChanged()
+    on_WantHChanged: _sizeChanged()
+    function _sizeChanged() {
+        if (_wantW === _pxW && _wantH === _pxH) { sizeSettle.stop(); return; }
+        // Nothing shown yet: take the size at once.
+        if (!_front || _pxW <= 0 || _pxH <= 0) { sizeSettle.stop(); _applySize(); }
+        else sizeSettle.restart();
+    }
+    function _applySize() { _pxW = _wantW; _pxH = _wantH; }
+    Timer { id: sizeSettle; interval: 250; onTriggered: root._applySize() }
     readonly property string _custom: {
         if (_customFailed) return "";
         if (source.toString() !== "") return source.toString();
@@ -80,7 +100,18 @@ Item {
     // the file at full resolution.
     readonly property string _target: (_pxW > 0 && _pxH > 0) ? (_custom || _bundled) : ""
 
-    on_TargetChanged: _show(_target)
+    // The decode size a layer gets for `url`: the small pre-blurred file at
+    // its own size; custom art in blurred mode tiny (smooth upscaling blurs
+    // it, no shader); everything else at the item's pixel size.
+    function _decodeSize(url) {
+        if (blurred && _custom === "") return Qt.size(-1, -1);
+        if (blurred) return Qt.size(Math.max(1, Math.round(_pxW / 16)), Math.max(1, Math.round(_pxH / 16)));
+        return Qt.size(_pxW, _pxH);
+    }
+    function _key(url, sz) { return url === "" ? "" : url + "|" + sz.width + "x" + sz.height; }
+    readonly property string _targetKey: _target === "" ? "" : _key(_target, _decodeSize(_target))
+
+    on_TargetKeyChanged: _show(_target)
     onSourceChanged: _customFailed = false
     Connections {
         target: Services.appearance
@@ -95,18 +126,21 @@ Item {
     function _show(url) {
         if (fade.running) _finishFade();
         if (url === "") return;
-        if (_incoming && _incoming.source.toString() === url) return;   // already loading
-        if (_front && _front.source.toString() === url) {
+        const size = _decodeSize(url), key = _key(url, size);
+        if (_incoming && _incoming.key === key) return;   // already loading
+        if (_front && _front.key === key) {
             // Back to what is already shown (e.g. a toggle undone mid-load).
-            if (_incoming) { _incoming.source = ""; _incoming = null; }
+            if (_incoming) { _incoming.source = ""; _incoming.key = ""; _incoming = null; }
             return;
         }
         const next = (_front === layerA) ? layerB : layerA;
-        if (_incoming && _incoming !== next) _incoming.source = "";
+        if (_incoming && _incoming !== next) { _incoming.source = ""; _incoming.key = ""; }
         next.opacity = 0;
         next.z = 1;
         if (_front) _front.z = 0;
         _incoming = next;
+        next.decodeSize = size;
+        next.key = key;
         next.source = url;
         if (next.status === Image.Ready) _startFade();   // cached (blurred) hit
     }
@@ -118,7 +152,7 @@ Item {
         fade.stop();
         if (!_incoming) return;
         _incoming.opacity = 1;
-        if (_front && _front !== _incoming) _front.source = "";   // release the hidden texture
+        if (_front && _front !== _incoming) { _front.source = ""; _front.key = ""; }   // release the hidden texture
         _front = _incoming;
         _incoming = null;
     }
@@ -135,7 +169,7 @@ Item {
             _nameFailed = true;
         } else {
             console.warn("Wallpaper: cannot load", url);
-            if (layer === _incoming) { layer.source = ""; _incoming = null; }
+            if (layer === _incoming) { layer.source = ""; layer.key = ""; _incoming = null; }
         }
     }
 
@@ -156,15 +190,14 @@ Item {
         asynchronous: true
         smooth: true
         mipmap: false
+        // Set with the source by _show(), never changed under a shown image
+        // (that would blank it while it decodes again).
+        property size decodeSize: Qt.size(-1, -1)
+        property string key: ""
         // The pre-blurred file is small and shared (lock screen + glass), so
         // it may stay cached; full-size art never is.
-        readonly property bool isSmall: root.blurred && root._custom === ""
-        cache: isSmall
-        // Custom images in blurred mode: decode tiny and let smooth upscaling
-        // blur it (no shader). Otherwise decode at the item's pixel size.
-        sourceSize: isSmall ? Qt.size(-1, -1)
-                    : root.blurred ? Qt.size(Math.max(1, Math.round(root._pxW / 16)), Math.max(1, Math.round(root._pxH / 16)))
-                    : Qt.size(root._pxW, root._pxH)
+        cache: decodeSize.width < 0
+        sourceSize: decodeSize
         onStatusChanged: {
             if (status === Image.Ready && layer === root._incoming && !fade.running) root._startFade();
             else if (status === Image.Error) root._failed(layer);
@@ -178,5 +211,5 @@ Item {
     Layer { id: layerA }
     Layer { id: layerB }
 
-    Component.onCompleted: _show(_target)
+    Component.onCompleted: { _applySize(); _show(_target); }
 }
