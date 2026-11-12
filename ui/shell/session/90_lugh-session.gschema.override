@@ -1,0 +1,11 @@
+# Lugh session defaults for GNOME/GTK settings (installed to
+# /usr/share/glib-2.0/schemas; glib's trigger recompiles the schemas).
+# The ":Lugh" sections apply only where XDG_CURRENT_DESKTOP contains "Lugh",
+# so other desktops on the same machine keep their own defaults.
+
+# Window title bars: buttons on the right, minimize / maximize / close, for
+# GTK 3, GTK 4 / libadwaita, Firefox and Qt's Adwaita decoration (the last
+# two read it through the Settings portal). The shell's appearance service
+# writes the user's choice ([shell] titlebarButtons in lugh-shell.conf).
+[org.gnome.desktop.wm.preferences:Lugh]
+button-layout='appmenu:minimize,maximize,close'
