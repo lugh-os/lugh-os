@@ -3,9 +3,23 @@
 //!
 //! State: `available` (bool), `workspaces` [`wsId` int, `name`, `occupied`],
 //! `activeWorkspace` (int), `focusedAppId`, `focusedAppName`, `focusedTitle`,
-//! `toplevels` [`winId`, `appId`, `title`, `workspace` int, `focused`],
-//! `dockOverlapped` (bool).
-//! Methods: `switchWorkspace(wsId)`, `activate(winId)`, `close(winId)`.
+//! `toplevels` [`winId`, `appId`, `title`, `workspace` int, `focused`,
+//! `x`, `y`, `width`, `height` (logical px relative to the origin of the
+//! window's monitor), `monitorWidth`, `monitorHeight` (logical px); all 0
+//! when unknown; `monitor` (that monitor's output name, "" when unknown)],
+//! `dockOverlapped` (bool), `activeOutput` (the focused output's name, e.g.
+//! `eDP-1`: Hyprland's connector names are the `wl_output` names Qt uses as
+//! screen names; "" when unknown).
+//! Methods: `switchWorkspace(wsId)`, `activate(winId)`, `close(winId)`,
+//! `moveToWorkspace(winId, wsId)` (without following the window).
+//!
+//! `workspaces` always holds 1..=4 (more when the compositor reports higher
+//! ids). The backend does not know the shell's workspace grid size
+//! (`ShellSettings.workspaceRows × workspaceCols`): the QML overview fills in
+//! the empty grid workspaces itself.
+//!
+//! Window geometry comes from compositor snapshots, refreshed shortly after
+//! events that may move windows; it can lag a live drag by a moment.
 //!
 //! `appId` in `toplevels` and `focusedAppId` is the desktop-entry id the
 //! window was matched to (so it joins with `apps.installed` / `apps.dock`),
@@ -52,6 +66,9 @@ impl Service for WmService {
             "switchWorkspace" => inner.switch_workspace(args::i64(a, 0)?)?,
             "activate" => inner.activate_window(&args::string(a, 0)?)?,
             "close" => inner.close_window(&args::string(a, 0)?)?,
+            "moveToWorkspace" => {
+                inner.move_window_to_workspace(&args::string(a, 0)?, args::i64(a, 1)?)?;
+            }
             other => return Err(CallError::UnknownMethod(format!("wm.{other}"))),
         }
         Ok(Value::Null)
