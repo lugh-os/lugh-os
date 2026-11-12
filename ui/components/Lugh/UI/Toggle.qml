@@ -13,6 +13,8 @@ import QtQuick.Templates as T
 T.Switch {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string disabledReason: ""
 
     readonly property int _trackW: 40
@@ -32,7 +34,7 @@ T.Switch {
     opacity: enabled ? 1 : Theme.disabledOpacity
 
     Accessible.role: Accessible.CheckBox
-    Accessible.name: text
+    Accessible.name: accessibleName !== "" ? accessibleName : text
     Accessible.checkable: true
     Accessible.checked: checked
     Accessible.description: !enabled ? disabledReason : ""
