@@ -1,0 +1,57 @@
+/* Lugh: compact title bars, one window shape.
+ *
+ * System-wide file: /usr/share/lugh/xdg/gtk-3.0/gtk.css. GTK reads gtk.css
+ * only from the user's config dir, so lugh-session adds
+ *   @import url("file:///usr/share/lugh/xdg/gtk-3.0/gtk.css");
+ * at the top of ~/.config/gtk-3.0/gtk.css once (never overwriting it).
+ *
+ * Hyprland draws the rounded corners (14 px) and the shadow of every window,
+ * so the CSD shadow, its margin and the title bar's own corner radius are
+ * removed here: otherwise a second shape shows behind the window. Resizing
+ * from the edges is Hyprland's too (resize_on_border). */
+
+decoration,
+decoration:backdrop,
+.csd decoration,
+.csd decoration:backdrop {
+  box-shadow: none;
+  border: none;
+  margin: 0;
+}
+
+headerbar.titlebar,
+.titlebar:not(headerbar),
+.csd headerbar.titlebar {
+  border-radius: 0;
+}
+
+/* Compact header bars (Adwaita: 46 px). */
+headerbar {
+  min-height: 34px;
+  padding: 0 6px;
+}
+
+headerbar button,
+headerbar entry,
+headerbar spinbutton,
+headerbar combobox button {
+  min-height: 24px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+/* Title bar of windows without a header bar (GTK_CSD=1). */
+headerbar.default-decoration {
+  min-height: 28px;
+  padding: 2px 6px;
+}
+
+/* Window buttons: small, right side (gtk-decoration-layout). */
+button.titlebutton,
+headerbar button.titlebutton,
+headerbar.default-decoration button.titlebutton {
+  min-height: 20px;
+  min-width: 20px;
+  padding: 2px;
+  margin: 0 1px;
+}
