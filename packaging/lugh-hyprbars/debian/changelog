@@ -1,0 +1,6 @@
+lugh-hyprbars (0.0.1) trixie; urgency=medium
+
+  * Initial release: hyprbars from hyprland-plugins 3aa21f2 (the pin for
+    Hyprland 0.55.2) with the Lugh decoration-mode patch.
+
+ -- Lugh Developers <dev@lugh.example>  Wed, 11 Nov 2026 12:00:00 +0000
