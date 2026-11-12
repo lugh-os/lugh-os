@@ -1,11 +1,13 @@
-// Launcher demo: the wallpaper, the center island, and the launcher dropping
-// out of it.
+// Launcher demo: the wallpaper, a bottom-panel stand-in with the start
+// button, and the launcher opening above it.
 //
 //   QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh ui/shell/qml/demos/launcher.qml \
 //       /tmp/lugh-shots/launcher/fi-light.png 1440 900 900 -- --query fi
 //
 // Args:
 //   --dark, --accent <name>, --reduce-motion
+//   --from-panel       open as the start button does (grows out of it; needs
+//                      ShellState.launcherFromPanel, else opens from center)
 //   --query <text>     opened as ShowLauncher(query) would (Services.shell.showLauncher)
 //   --recent-key       keyboard highlight on the second recent tile
 //   --down <n>         press ↓ n times after opening
@@ -48,6 +50,7 @@ Item {
         Theme.dark = flag("--dark");
         Theme.accentName = arg("--accent", "amber");
         Theme.reduceMotion = flag("--reduce-motion");
+        if ("launcherFromPanel" in ShellState) ShellState.launcherFromPanel = flag("--from-panel");
         if (flag("--slow")) slow.attach();
         else if (flag("--no-recent")) Services.launcher.recent.clear();
         configured = true;
@@ -110,22 +113,30 @@ Item {
         sourceComponent: Wallpaper { _useRepo: true }
     }
 
-    // The center island the launcher drops out of.
-    Island {
-        id: island
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: Theme.islandMargin
-        height: Theme.islandHeight
-        interactive: false
-        text: qsTr("Clock")
-        Text {
+    // A stand-in for the bottom panel: the start button the launcher grows
+    // out of (with --from-panel) and the strip it keeps clear of.
+    Item {
+        id: panelStrip
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: ShellState.panelReserved
+        Island {
+            id: startButton
+            x: Theme.space12
             anchors.verticalCenter: parent.verticalCenter
-            text: "Tue 10 · 02:20"
-            font: Theme.typeLabelTnum
-            color: Theme.text
+            height: Theme.islandHeight
+            interactive: false
+            text: qsTr("Start")
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "layout-grid"
+                size: 16
+                color: Theme.text
+            }
         }
     }
-    Binding { target: ShellState; property: "centerIsland"; value: island.sceneRect }
+    Binding { target: ShellState; property: "logoIsland"; value: startButton.sceneRect }
 
     Launcher {
         id: launcher
@@ -255,7 +266,7 @@ Item {
             const f = demo.Window.window.activeFocusItem;
             console.log("frame " + String(n).padStart(2, "0") + " t=" + (Date.now() - demo._t0) + "ms panel x=" + p.x.toFixed(1)
                         + " y=" + p.y.toFixed(1) + " w=" + p.width.toFixed(1) + " h=" + p.height.toFixed(1)
-                        + " r=" + p.radius.toFixed(1) + " op=" + p.opacity.toFixed(2)
+                        + " r=" + p.radius.toFixed(1) + " op=" + p.opacity.toFixed(2) + " s=" + p._s.toFixed(3)
                         + " shown=" + launcher.shown + " fieldFocus=" + (f !== null && f.placeholderText !== undefined));
             demo._pending++;
             demo.grabToImage(r => {
