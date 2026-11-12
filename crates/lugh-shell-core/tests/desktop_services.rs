@@ -330,12 +330,17 @@ fn wm_apps_and_launcher_end_to_end() {
         first["toplevels"],
         json!([
             { "winId": "0xa1", "appId": "firefox", "title": "Lugh — Mozilla Firefox",
-              "workspace": 1, "focused": true },
+              "workspace": 1, "focused": true,
+              "x": 100, "y": 60, "width": 900, "height": 700,
+              "monitorWidth": 1920, "monitorHeight": 1080, "monitor": "eDP-1" },
             // The class `foot` is matched to its reverse-DNS desktop id.
             { "winId": "0xb2", "appId": "org.codeberg.dnkl.foot", "title": "amara@lugh: ~",
-              "workspace": 1, "focused": false },
+              "workspace": 1, "focused": false,
+              "x": 300, "y": 200, "width": 700, "height": 400,
+              "monitorWidth": 1920, "monitorHeight": 1080, "monitor": "eDP-1" },
         ])
     );
+    assert_eq!(first["activeOutput"], "eDP-1");
     // activeWorkspace 1 and dockOverlapped false equal the defaults: not sent.
     assert!(first.get("activeWorkspace").is_none() && first.get("dockOverlapped").is_none());
 
@@ -400,8 +405,19 @@ fn wm_apps_and_launcher_end_to_end() {
     assert_eq!(focus["toplevels"].as_array().unwrap().len(), 3);
     assert!(focus.get("workspaces").is_none(), "unchanged array resent");
     // Geometry arrives with the debounced resnapshot: no polling involved.
+    // The new window's geometry roles come with it.
     let overlap = rig.seen.patch("wm", "dockOverlapped");
-    assert_eq!(overlap, json!({ "dockOverlapped": true }));
+    assert_eq!(overlap["dockOverlapped"], true);
+    let vlc_row = row(&overlap["toplevels"], "winId", "0xc3");
+    assert_eq!(
+        [
+            &vlc_row["x"],
+            &vlc_row["y"],
+            &vlc_row["width"],
+            &vlc_row["height"]
+        ],
+        [200, 500, 800, 560]
+    );
 
     // ---- title storm: coalesced ------------------------------------------
     rig.seen.clear();
@@ -457,6 +473,24 @@ fn wm_apps_and_launcher_end_to_end() {
     );
     assert!(matches!(
         rig.call("wm.activate", json!(["0xdead"])),
+        Err(CallError::Failed(_))
+    ));
+    assert_eq!(
+        rig.call("wm.moveToWorkspace", json!(["0xb2", 2])),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        fake.requests(1),
+        [
+            r#"dispatch hl.dsp.window.move({ workspace = 2, follow = false, window = "address:0xb2" })"#
+        ]
+    );
+    assert!(matches!(
+        rig.call("wm.moveToWorkspace", json!(["0xb2", 0])),
+        Err(CallError::BadArgs(_))
+    ));
+    assert!(matches!(
+        rig.call("wm.moveToWorkspace", json!(["0xdead", 2])),
         Err(CallError::Failed(_))
     ));
     // The app is running and not focused: focus its window, no launch.
@@ -610,6 +644,72 @@ fn wm_apps_and_launcher_end_to_end() {
         json!({ "query": "", "results": [], "searching": false })
     );
 
+    // ---- a second, scaled output takes the focus --------------------------
+    // HDMI-A-1: 3840×2160 at scale 2 (1920×1080 logical) right of eDP-1,
+    // showing workspace 2 with one window. The focus event names an output
+    // the shell has not seen yet: it resnapshots.
+    rig.seen.clear();
+    fake.set(
+        "j/monitors",
+        json!([
+            { "id": 0, "name": "eDP-1", "description": "", "width": 1920, "height": 1080,
+              "x": 0, "y": 0, "scale": 1.0, "transform": 0, "focused": false,
+              "activeWorkspace": { "id": 1, "name": "1" } },
+            { "id": 1, "name": "HDMI-A-1", "description": "", "width": 3840, "height": 2160,
+              "x": 1920, "y": 0, "scale": 2.0, "transform": 0, "focused": true,
+              "activeWorkspace": { "id": 2, "name": "2" } },
+        ]),
+    );
+    let big = client("0xe5", "vlc", "Trailer", (2, "2"), [2020, 140, 1200, 800]);
+    fake.set("j/clients", json!([firefox, foot_min, vlc, quick, big]));
+    fake.set(
+        "j/workspaces",
+        json!([
+            workspace(1, "1", 3),
+            { "id": 2, "name": "2", "monitor": "HDMI-A-1", "windows": 1 },
+            workspace(-99, "special:minimized", 1)
+        ]),
+    );
+    fake.set("j/activeworkspace", json!({ "id": 2, "name": "2" }));
+    fake.send("focusedmon>>HDMI-A-1,2\n");
+    let d = rig.seen.patch("wm", "activeOutput");
+    assert_eq!(d["activeOutput"], "HDMI-A-1");
+    let d = rig.seen.wait("window on HDMI-A-1", |e| {
+        e["s"] == "wm"
+            && e["d"]["toplevels"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|w| w["winId"] == "0xe5"))
+    });
+    let on_hdmi = row(&d["d"]["toplevels"], "winId", "0xe5");
+    assert_eq!(
+        [
+            &on_hdmi["x"],
+            &on_hdmi["y"],
+            &on_hdmi["width"],
+            &on_hdmi["height"],
+            &on_hdmi["monitorWidth"],
+            &on_hdmi["monitorHeight"],
+            &on_hdmi["monitor"],
+        ],
+        [
+            &json!(100),
+            &json!(140),
+            &json!(1200),
+            &json!(800),
+            &json!(1920),
+            &json!(1080),
+            &json!("HDMI-A-1")
+        ]
+    );
+    assert_eq!(rig.svc("wm").state()["activeOutput"], "HDMI-A-1");
+    // Back to the known laptop panel: straight from the event.
+    rig.seen.clear();
+    fake.send("focusedmon>>eDP-1,1\n");
+    assert_eq!(
+        rig.seen.patch("wm", "activeOutput")["activeOutput"],
+        "eDP-1"
+    );
+
     // ---- the event socket drops: unavailable, then back -------------------
     rig.seen.clear();
     fake.events.send(EventCmd::Drop).unwrap();
@@ -646,7 +746,7 @@ fn without_a_compositor_everything_still_answers() {
         rig.svc("wm").state(),
         json!({ "available": false, "workspaces": [], "activeWorkspace": 1,
                 "focusedAppId": "", "focusedAppName": "", "focusedTitle": "",
-                "toplevels": [], "dockOverlapped": false })
+                "toplevels": [], "dockOverlapped": false, "activeOutput": "" })
     );
     // Pinned and installed apps only; nothing runs.
     let apps = rig.svc("apps").state();
