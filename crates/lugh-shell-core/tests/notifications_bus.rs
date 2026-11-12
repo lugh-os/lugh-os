@@ -349,12 +349,13 @@ async fn notifications_and_shell_on_a_private_bus() {
         ("ToggleNotificationCenter", "toggleNotificationCenter"),
         ("ToggleLughMenu", "toggleLughMenu"),
         ("CloseAll", "closeAll"),
+        ("ShowOverview", "showOverview"),
+        ("FocusPanel", "focusPanel"),
         ("Lock", "lockRequested"),
     ] {
         shell_call(&client, method, &()).await;
         assert_eq!(next(&mut events).await, sig(name, json!([])), "{method}");
     }
-    shell_call(&client, "ShowOverview", &()).await; // accepted, no event
 
     for (kind, value, want) in [
         ("volume", 0.4, json!(["volume", 0.4])),
