@@ -90,3 +90,9 @@ hl.config({
         dim_inactive = false,
     },
 })
+
+-- Title bars for windows that rely on the compositor for their frame (foot,
+-- mpv, Qt, X11 apps, ...): Lugh's hyprbars build, 26 px, buttons on the right,
+-- theme colours. Loaded only when installed for this Hyprland version; see
+-- lugh/titlebars.lua.
+require("lugh.titlebars").setup()
