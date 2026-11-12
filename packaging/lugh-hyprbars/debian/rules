@@ -1,0 +1,52 @@
+#!/usr/bin/make -f
+# Builds the hyprbars plugin (vendored in packaging/lugh-hyprbars/src, see
+# src/README.Lugh) against the installed hyprland-dev. Debian's Hyprland
+# 0.55.2 binary was built with hyprutils 0.13 (libhyprutils12) while
+# trixie-backports now ships libhyprutils-dev 0.14, whose headers don't match
+# that ABI: the vendored hyprutils 0.13.1 headers come first on the include
+# path. The plugin is not linked against Hyprland: its symbols resolve when
+# the compositor loads it (hence no -z defs).
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/buildflags.mk
+
+SRC := packaging/lugh-hyprbars/src
+HYPRLAND_VERSION := $(shell pkg-config --modversion hyprland)
+HYPRLAND_DEB_VERSION := $(shell dpkg-query -W -f='$${Version}' hyprland-dev)
+PKGS := pixman-1 libdrm hyprland libinput libudev wayland-server xkbcommon
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -shared -fPIC -std=c++2b \
+	  -Wno-c++11-narrowing -Wno-deprecated-declarations --no-gnu-unique \
+	  -I$(SRC)/hyprutils/include $$(pkg-config --cflags $(PKGS)) \
+	  $(LDFLAGS) \
+	  $(SRC)/hyprbars/main.cpp $(SRC)/hyprbars/barDeco.cpp $(SRC)/hyprbars/BarPassElement.cpp \
+	  -o hyprbars.so
+	printf '%s\n' '$(HYPRLAND_VERSION)' > hyprbars.hyprland-version
+
+override_dh_auto_test:
+	# Every symbol the plugin needs must exist in this Hyprland (or a library
+	# it links): a mismatch would otherwise only show when the session loads it.
+	nm -D --undefined-only hyprbars.so | awk '{print $$2}' | sed 's/@.*//' | \
+	  grep -v -e '^_ITM_' -e '^__gmon_start__$$' | sort -u > undefined.txt
+	{ nm -D --defined-only /usr/bin/Hyprland | awk '{print $$3}'; \
+	  for l in $$(ldd /usr/bin/Hyprland | awk '/=>/ {print $$3}'); do \
+	    nm -D --defined-only "$$l" | awk '{print $$3}'; done; } | \
+	  sed 's/@.*//' | sort -u > defined.txt
+	missing=$$(comm -23 undefined.txt defined.txt); \
+	  if [ -n "$$missing" ]; then echo "unresolved symbols:"; echo "$$missing"; exit 1; fi
+
+override_dh_auto_install:
+	install -D -m 0644 hyprbars.so \
+	  debian/lugh-hyprbars/usr/lib/lugh/hyprland/hyprbars.so
+	install -D -m 0644 hyprbars.hyprland-version \
+	  debian/lugh-hyprbars/usr/lib/lugh/hyprland/hyprbars.hyprland-version
+
+override_dh_auto_clean:
+	rm -f hyprbars.so hyprbars.hyprland-version undefined.txt defined.txt
+
+override_dh_gencontrol:
+	dh_gencontrol -- -Vhyprland:Version=$(HYPRLAND_DEB_VERSION)
