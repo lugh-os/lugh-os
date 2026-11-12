@@ -15,6 +15,8 @@ import QtQuick.Templates as T
 T.Button {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string iconName: ""
     property string variant: "secondary"
     property string size: "md"
@@ -61,7 +63,7 @@ T.Button {
     Keys.onReleased: event => { if (loading) event.accepted = true }
 
     Accessible.role: Accessible.Button
-    Accessible.name: text
+    Accessible.name: accessibleName !== "" ? accessibleName : text
     Accessible.description: loading ? qsTr("Working…") : (!enabled ? disabledReason : "")
 
     background: Rectangle {
