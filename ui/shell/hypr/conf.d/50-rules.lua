@@ -37,6 +37,16 @@ hl.window_rule({
     no_focus = true,
 })
 
+-- Firefox on a fresh profile maps its main window at ~500x200 before it has
+-- a remembered size. Give the main browser window (initial title "Mozilla
+-- Firefox"; dialogs and the Library window have other titles) a sensible
+-- first size; the clamp below keeps it inside the usable area.
+hl.window_rule({
+    name  = "lugh-firefox-size",
+    match = { class = "^(firefox|firefox-esr|org.mozilla.firefox)$", initial_title = "^Mozilla Firefox$" },
+    size  = "monitor_w*0.72 monitor_h*0.78",
+})
+
 -- Picture-in-picture: small, pinned on all workspaces, bottom right.
 hl.window_rule({
     name  = "lugh-pip",
@@ -47,6 +57,13 @@ hl.window_rule({
     move  = "monitor_w-490 monitor_h-340",
 })
 
+-- Floating windows that open bigger than the usable area (the screen minus
+-- the dock), or partly off it, are shrunk and centered so their title bar
+-- and edges stay reachable. Rules can't express "at most the screen", so a
+-- window.open handler does it (lugh/window.lua), and again when monitors or
+-- their scale change.
+require("lugh.window").install_clamp()
+
 -- Per-workspace tiling (Super+T): restores the workspaces that had tiling on
 -- before a `hyprctl reload`.
 require("lugh.tiling").restore()
@@ -55,13 +72,17 @@ require("lugh.tiling").restore()
 -- Layer surfaces (namespaces set by lugh-shell through LayerShellQt)
 ---------------------------------------------------------------------------
 
--- Glass surfaces: blur what is behind them. ignore_alpha 0.3 = pixels of the
--- surface with alpha < 0.3 (the transparent margins around the bar pill, the
--- dock, the shadows QML draws) are not blurred, so blur stays inside the shape.
+-- Glass surfaces: blur what is behind them. ignore_alpha 0.55 = pixels of
+-- the surface with alpha below 0.55 (the transparent margins around the
+-- dock, the soft shadows and glows QML draws around a panel, anti-aliased
+-- edges) are not blurred, so the blur never shows past the visible glass
+-- shape as a second, larger shape. Glass fills themselves are more opaque
+-- than that (DESIGN-SYSTEM shell-glass).
 local glass = {
-    "lugh-bar",
     "lugh-dock",
     "lugh-launcher",
+    "lugh-overview",
+    "lugh-customize",
     "lugh-controlcenter",
     "lugh-notifications",
     "lugh-notification-center",
@@ -73,7 +94,7 @@ for _, ns in ipairs(glass) do
         name         = "lugh-glass-" .. ns,
         match        = { namespace = "^" .. ns .. "$" },
         blur         = true,
-        ignore_alpha = 0.3,
+        ignore_alpha = 0.55,
     })
 end
 
@@ -94,14 +115,16 @@ hl.layer_rule({
     no_anim = true,
 })
 
--- The shell owns the motion of its pop-up surfaces: they grow out of an island
+-- The shell owns the motion of all its surfaces: they grow out of an island
 -- with QML's liquid motion (docs/design/lugh-mode.md) and unmap when their own
--- exit has finished. A compositor fade on top would only double it. Turn it
--- back on from user.lua with lugh.rules.shell_noanim:set_enabled(false).
+-- exit has finished. A compositor fade or slide on top would only double it
+-- (or slide from the wrong edge), so every lugh-* namespace, present and
+-- future, gets none. Turn it back on from user.lua with
+-- lugh.rules.shell_noanim:set_enabled(false).
 lugh.rules = lugh.rules or {}
 lugh.rules.shell_noanim = hl.layer_rule({
     name    = "lugh-shell-noanim",
-    match   = { namespace = "^lugh-(bar|dock|launcher|controlcenter|notifications|notification-center|menu|osd)$" },
+    match   = { namespace = "^lugh-.+$" },
     no_anim = true,
 })
 
