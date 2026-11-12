@@ -1,0 +1,14 @@
+# Lugh: Chromium (Debian's chromium package sources /etc/chromium.d/*).
+# Installed by lugh-session; applies only inside a Lugh session.
+#
+# Native Wayland. Chromium then asks for client-side decorations and draws
+# its own frame (tabs in the title bar, buttons on the right from the GTK
+# button-layout that Lugh sets); with "Use system title bar and borders" it
+# asks for server-side and gets the Lugh title bar instead. Never both.
+# --enable-features is left alone: Chromium keeps only the last one given,
+# so setting it here would silently drop the user's own.
+case ":${XDG_CURRENT_DESKTOP:-}:" in
+    *:Lugh:*)
+        export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ozone-platform-hint=auto"
+        ;;
+esac
