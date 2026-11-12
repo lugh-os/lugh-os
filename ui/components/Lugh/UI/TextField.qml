@@ -14,6 +14,8 @@ import QtQuick.Templates as T
 T.TextField {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string iconName: ""
     property string errorText: ""
     property bool password: false
@@ -51,7 +53,7 @@ T.TextField {
     opacity: enabled ? 1 : Theme.disabledOpacity
 
     Accessible.role: Accessible.EditableText
-    Accessible.name: placeholderText
+    Accessible.name: accessibleName !== "" ? accessibleName : placeholderText
     // Qt blanks Accessible.name on password edits, so repeat the label in the
     // description (which it keeps) for password fields.
     Accessible.description: password ? [Accessible.name || placeholderText, errorText].filter(t => t).join(". ") : errorText
