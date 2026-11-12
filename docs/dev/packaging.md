@@ -15,7 +15,8 @@ Sources: `packaging/<package>/debian/`, `scripts/build-debs.sh`,
 | `lugh-ui` | all | the `Lugh.UI` QML module → `/usr/share/lugh/qml/Lugh/UI/`, Lucide font → `/usr/share/lugh/qml/fonts/lucide.ttf` |
 | `lugh-shell` | amd64 | `/usr/bin/lugh-shell`, `/usr/share/lugh/qml/main.qml`, `/usr/share/lugh/qml/Lugh/Shell/`, `/usr/lib/systemd/user/lugh-session.target` + `lugh-shell.service`, `/usr/share/dbus-1/services/space.lugh.Shell1.service`, `/etc/pam.d/lugh-lock`, `/usr/share/lugh/launcher/aliases.toml` |
 | `lugh-greeter` | amd64 | `/usr/bin/lugh-greeter`, `/usr/share/lugh/greeter/qml/`, `/usr/libexec/lugh/greeter-session`, `/etc/greetd/config.toml` (diverted), `tmpfiles.d` for `/run/lugh-greeter` and `/var/lib/lugh-greeter` |
-| `lugh-session` | all | `/usr/bin/lugh-session`, `/usr/share/wayland-sessions/lugh.desktop`, `/usr/share/xdg-terminal-exec/lugh-xdg-terminals.list` (foot first), the Hyprland config → `/usr/share/lugh/hypr/` (`lugh.lua`, `conf.d/`, `lugh/`, `scripts/`), `/usr/share/xdg-desktop-portal/lugh-portals.conf`, `hyprland.md` in the doc dir |
+| `lugh-session` | all | `/usr/bin/lugh-session`, `/usr/share/wayland-sessions/lugh.desktop`, `/usr/share/xdg-terminal-exec/lugh-xdg-terminals.list` (foot first), the Hyprland config → `/usr/share/lugh/hypr/` (`lugh.lua`, `conf.d/`, `lugh/`, `scripts/`), `/usr/share/xdg-desktop-portal/lugh-portals.conf`, the GTK/foot defaults → `/usr/share/lugh/xdg/` (first in `XDG_CONFIG_DIRS` inside the session), `/etc/chromium.d/lugh`, a gsettings override (`90_lugh-session.gschema.override`), `hyprland.md` in the doc dir |
+| `lugh-hyprbars` | amd64 | the hyprbars plugin built for the archive's Hyprland → `/usr/lib/lugh/hyprland/hyprbars.so` + `hyprbars.hyprland-version` (source vendored in `packaging/lugh-hyprbars/src`, update steps in `src/README.Lugh`) |
 | `lugh-desktop-minimal` | all | metapackage: the Minimal profile |
 
 `/usr/share/lugh/qml` is one QML import root shared by three packages: the
@@ -37,8 +38,9 @@ All packages carry the same version: `<VERSION>.<patch>` (`0.0` → `0.0.1`).
 icons and logos), `fonts-inter` and `fonts-jetbrains-mono` (the theme's type).
 
 **lugh-shell**: Qt libraries and libpam through `${shlibs:Depends}`;
-`layer-shell-qt` + `qml6-module-org-kde-layershell` (bar, dock and panels are
-layer surfaces), `qt6-wayland`; `pulseaudio-utils` (`pactl`), `pipewire-pulse`,
+`layer-shell-qt` + `qml6-module-org-kde-layershell` (the panel and the
+overlays are layer surfaces), `qml6-module-qtcore` (`ShellSettings` uses
+`QtCore.Settings`), `qt6-wayland`; `pulseaudio-utils` (`pactl`), `pipewire-pulse`,
 `wireplumber` (sound); `network-manager` (Wi-Fi); `upower` (battery);
 `papirus-icon-theme` (default app icons), `adwaita-icon-theme` (fallback,
 cursor); `wl-clipboard`, `grim`, `slurp` (clipboard, screenshots);
@@ -57,9 +59,22 @@ from **trixie-backports** (Hyprland is not in trixie itself);
 ADR-020); `systemd`, `dbus-bin`, `dbus-user-session` (session start, D-Bus
 calls from keybinds, scopes); `wireplumber`, `pipewire-pulse`, `brightnessctl`,
 `playerctl` (media keys); `polkitd`, `pkexec`; `xdg-terminal-exec`, `foot`;
-`qt6-wayland`, `adwaita-icon-theme`; `lugh-shell`. Recommends:
+`qt6-wayland (>= 6.8)` (its Adwaita decoration plugin), `adwaita-icon-theme`;
+`dconf-gsettings-backend`, `gsettings-desktop-schemas` (GTK button layout and
+dark mode through the Settings portal); `lugh-shell`. Recommends:
 `hyprland-guiutils` (backports; "app not responding" dialog),
-`libpam-gnome-keyring`, `pcmanfm-qt`, `xwayland`.
+`libpam-gnome-keyring`, `lugh-hyprbars` (title bars, see below),
+`pcmanfm-qt`, `xwayland`, `fonts-inter`.
+
+**lugh-hyprbars**: `hyprland (= <the exact version it was built against>)`,
+because Hyprland plugins must match the compositor build (no stable ABI).
+`debian/rules` checks after the build that every symbol the plugin needs
+exists in that Hyprland and its libraries, and fails otherwise. Built
+against `hyprland-dev` from trixie-backports, which the build container
+installs. **When backports moves Hyprland, rebuild this package**: until
+then apt holds Hyprland back, and the ISO build fails on the unsatisfiable
+dependency. `lugh/titlebars.lua` also refuses to load a plugin whose
+`.hyprland-version` stamp differs from the running Hyprland.
 
 **lugh-desktop-minimal**: the four Lugh packages above, `firefox` (from
 `packages.mozilla.org`, as configured in `iso/config/archives/mozilla.*`),
