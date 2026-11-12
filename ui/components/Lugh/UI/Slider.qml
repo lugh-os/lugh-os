@@ -15,6 +15,8 @@ import QtQuick.Templates as T
 T.Slider {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string iconName: ""
     property string iconTooltip: ""
     property bool showValue: false
@@ -49,7 +51,7 @@ T.Slider {
     }
 
     Accessible.role: Accessible.Slider
-    Accessible.name: iconTooltip !== "" ? iconTooltip : iconName
+    Accessible.name: accessibleName !== "" ? accessibleName : (iconTooltip !== "" ? iconTooltip : iconName)
 
     background: Rectangle {
         id: track
