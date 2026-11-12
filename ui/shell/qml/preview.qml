@@ -4,22 +4,35 @@
 //
 //   scripts/shell-preview.sh [--width 1440] [--height 900] [--dark]
 //       [--accent amber|teal|green|blue|red|graphite] [--reduce-motion]
-//       [--state none|launcher|controlcenter|notifications|menu|lock|osd|toast]
+//       [--state none|launcher|controlcenter|notifications|menu|lock|osd|toast
+//                |overview|customize]
 //       [--query <text>]                       with --state launcher
 //       [--page wifi|bluetooth|sound|power]    with --state controlcenter
+//       [--page appearance|panel|clock|…]      with --state customize
 //       [--kind volume|brightness|mic|caps|layout|airplane] [--value 0..1]
 //                                              with --state osd
 //       [--backend ws://127.0.0.1:7777]        live services (lugh-shell-devd)
 //       [--screenshot <out.png>] [--shot-delay <ms>] [--measure]
 //       [--motion <state> --motion-out <dir>] [--motion-frames 24]
 //       [--motion-ms <stop after ms>] [--motion-offset <ms before 1st grab>]
-//       [--wallpaper-dir <file URL/>]          (set by the script when needed)
+//       [--wallpaper-dir <file URL/>]          (default: the repo's art)
+//       [--dev-config]                         (set by the script: see below)
 //
 // Keys: Meta/Ctrl+Space launcher · Ctrl+C control center · Ctrl+N
-// notifications · Ctrl+L lock · Ctrl+D dark toggle · Esc closes.
+// notifications · Ctrl+Tab overview · Ctrl+, customize · Ctrl+L lock ·
+// Ctrl+D dark toggle · Ctrl+B keyboard into the panel (Super+B on the
+// desktop) · Esc closes.
+//
+// Config: scripts/shell-preview.sh runs this with a throwaway XDG_CONFIG_HOME
+// and --dev-config; --dark / --accent / --reduce-motion (and Ctrl+D) are then
+// written into ShellSettings, so Customize shows the same values as the
+// screen, and the user's ~/.config/lugh/lugh-shell.conf is never touched.
+// Without --dev-config (qml6 by hand) they only set Theme for the run.
 //
 // Stacking mirrors the layer-shell layers: background (Wallpaper) < app
-// windows < top (Bar, Dock) < overlay (panels, toasts, lock).
+// windows < top (Panel, at the bottom edge) < overlay (panels, toasts, lock).
+// Appearance follows ShellSettings like main.qml; the flags override it.
+// Resize the window to check the layout at other screen sizes.
 // Glass: on Hyprland the compositor blurs behind glass. Here Theme.backdrop is
 // set to a pre-blurred wallpaper and GlassPanel draws the part under itself.
 //
@@ -63,10 +76,8 @@ Window {
     title: "Lugh preview"
 
     // Layer-shell geometry (contract in ui/shell/README.md): windows keep
-    // clear of the bar's and the dock's exclusive zones.
-    readonly property int barZone: bar.item && bar.item.exclusiveZone !== undefined
-                                   ? bar.item.exclusiveZone : Theme.barExclusiveZone
-    readonly property int dockZone: dock.item ? dock.item.exclusiveZone : 0
+    // clear of the panel's exclusive zone.
+    readonly property int panelZone: panel.item && panel.item.exclusiveZone !== undefined ? panel.item.exclusiveZone : 0
 
     // Surfaces are created only once Theme/Services are configured from the
     // args (no light→dark cross-fade at start, no wallpaper lookup misses)
@@ -116,10 +127,10 @@ Window {
             anchors.fill: parent
         }
 
-        // ---- app windows (work area between the bar and the dock zones) -----
+        // ---- app windows (work area above the panel's zone) -------------------
         Item {
             id: windows
-            anchors { fill: parent; topMargin: win.barZone; bottomMargin: win.dockZone }
+            anchors { fill: parent; topMargin: 8; bottomMargin: win.panelZone }
             visible: Services.wm.activeWorkspace === 1
 
             // Bottom → top. raise() moves an id to the end.
@@ -197,15 +208,8 @@ Window {
 
         // ---- top layer ------------------------------------------------------
         Surface {
-            id: bar
-            type: "Bar"
-            x: 0; y: 0
-            width: parent.width
-            height: item ? item.implicitHeight : 0
-        }
-        Surface {
-            id: dock
-            type: "Dock"
+            id: panel
+            type: "Panel"
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
             height: item ? item.implicitHeight : 0
         }
@@ -215,14 +219,16 @@ Window {
         Overlay { id: launcher; type: "Launcher" }
         Overlay { id: controlCenter; type: "ControlCenter" }
         Overlay { id: notificationCenter; type: "NotificationCenter" }
+        Overlay { id: overview; type: "Overview" }
+        Overlay { id: customize; type: "Customize" }
 
         Surface {
             id: popups
             type: "NotificationPopups"
             active: win.configured && win._firstFrame
             asynchronous: true
-            // Under the status island: bar height from the top, 10 from the right.
-            anchors { top: parent.top; topMargin: Theme.barHeight; right: parent.right; rightMargin: 10 }
+            // Top-right corner, 10 px from the edges (no top bar).
+            anchors { top: parent.top; topMargin: 10; right: parent.right; rightMargin: 10 }
             visible: item !== null && item.shown === true
         }
 
@@ -233,8 +239,11 @@ Window {
     Shortcut { sequences: ["Meta+Space", "Ctrl+Space"]; onActivated: ShellState.toggleLauncher() }
     Shortcut { sequence: "Ctrl+C"; enabled: !Services.session.locked; onActivated: ShellState.toggleControlCenter() }
     Shortcut { sequence: "Ctrl+N"; enabled: !Services.session.locked; onActivated: ShellState.toggleNotificationCenter() }
+    Shortcut { sequence: "Ctrl+Tab"; enabled: !Services.session.locked; onActivated: ShellState.toggleOverview() }
+    Shortcut { sequence: "Ctrl+,"; enabled: !Services.session.locked; onActivated: ShellState.toggleCustomize() }
     Shortcut { sequence: "Ctrl+L"; onActivated: { ShellState.closeAll(); Services.session.lock(); } }
-    Shortcut { sequence: "Ctrl+D"; onActivated: Theme.dark = !Theme.dark }
+    Shortcut { sequence: "Ctrl+D"; onActivated: win.toggleDark() }
+    Shortcut { sequence: "Ctrl+B"; enabled: !Services.session.locked; onActivated: ShellState.focusPanel() }
     Shortcut { sequence: "Esc"; enabled: ShellState.anyOverlayOpen; onActivated: ShellState.closeAll() }
 
     // ---- live backend (--backend ws://…) ----------------------------------
@@ -275,7 +284,7 @@ Window {
     // ---- start-up -----------------------------------------------------------
     // --state is applied once every deferred surface has loaded (or failed).
     readonly property bool overlaysReady: _firstFrame
-        && [lughMenu, launcher, controlCenter, notificationCenter, lockScreen, popups]
+        && [lughMenu, launcher, controlCenter, notificationCenter, overview, customize, lockScreen, popups]
            .every(l => l.status !== Loader.Loading && (l.status === Loader.Ready || l.sourceComponent === null))
     onOverlaysReadyChanged: if (overlaysReady) {
         applyState(startState);
@@ -304,6 +313,8 @@ Window {
         case "notifications": ShellState.toggleNotificationCenter(); break;
         case "menu": ShellState.toggleLughMenu(); break;
         case "lock": Services.session.lock(); break;
+        case "overview": ShellState.openOverview(); break;
+        case "customize": ShellState.openCustomize(arg("--page", "")); break;
         case "osd": Services.osd.show(arg("--kind", "volume"), Number(arg("--value", 0.62))); break;
         case "toast":
             Services.notifications.notify("Calendar", "Design review in 15 minutes",
@@ -316,14 +327,48 @@ Window {
         }
     }
 
+    // Appearance from ShellSettings (as main.qml). With --dev-config the
+    // flags were written into ShellSettings at start; without, they win for
+    // the run (Theme only).
+    readonly property bool devConfig: flag("--dev-config")
+    function applySettings() {
+        Theme.dark = (!devConfig && flag("--dark")) || ShellSettings.dark;
+        Theme.accentName = devConfig ? ShellSettings.accent : arg("--accent", ShellSettings.accent);
+        Theme.transparency = ShellSettings.transparency;
+        Theme.reduceMotion = (!devConfig && flag("--reduce-motion")) || ShellSettings.reduceMotion;
+        if ("animationScale" in Theme) Theme.animationScale = ShellSettings.animationScale;
+    }
+    function toggleDark() {
+        if (devConfig) ShellSettings.dark = !ShellSettings.dark;
+        else Theme.dark = !Theme.dark;
+    }
+    // Running from the source tree (always, for the preview): the repo's art,
+    // so nothing probes /usr/share/backgrounds/lugh before the flag lands.
+    function sourceTreeWallpapers() {
+        const self = Qt.resolvedUrl("preview.qml").toString();
+        return self.startsWith("file://") && !self.startsWith("file:///usr/")
+            ? Qt.resolvedUrl("../../../branding/wallpapers/").toString() : "";
+    }
+    Connections {
+        target: ShellSettings
+        function onDarkChanged() { win.applySettings(); }
+        function onAccentChanged() { win.applySettings(); }
+        function onTransparencyChanged() { win.applySettings(); }
+        function onReduceMotionChanged() { win.applySettings(); }
+        function onAnimationScaleChanged() { win.applySettings(); }
+    }
+
     Component.onCompleted: {
-        if (flag("--dark")) Theme.dark = true;
-        Theme.accentName = arg("--accent", "amber");
-        if (flag("--reduce-motion")) Theme.reduceMotion = true;
         // Bundled wallpaper dir when lugh-branding isn't installed (passed by
-        // scripts/shell-preview.sh).
-        const wpDir = arg("--wallpaper-dir", "");
+        // scripts/shell-preview.sh; else the repo's), before any image loads.
+        const wpDir = arg("--wallpaper-dir", "") || sourceTreeWallpapers();
         if (wpDir !== "") Services.appearance.wallpaperDir = wpDir;
+        if (devConfig) {
+            if (flag("--dark")) ShellSettings.dark = true;
+            if (arg("--accent", "") !== "") ShellSettings.accent = arg("--accent", "");
+            if (flag("--reduce-motion")) ShellSettings.reduceMotion = true;
+        }
+        applySettings();
         Theme.backdrop = blurredWall;
         if (backendUrl !== "" && startBackend(backendUrl)) {
             if (!configured) backendWait.start();
