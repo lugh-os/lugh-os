@@ -1,12 +1,14 @@
 module Lugh.Shell
 singleton ShellState 1.0 ShellState.qml
 singleton Services 1.0 Services.qml
+singleton ShellSettings 1.0 ShellSettings.qml
 Wallpaper 1.0 wallpaper/Wallpaper.qml
-Bar 1.0 bar/Bar.qml
+Panel 1.0 panel/Panel.qml
 LughMenu 1.0 bar/LughMenu.qml
-Dock 1.0 dock/Dock.qml
 Launcher 1.0 launcher/Launcher.qml
 ControlCenter 1.0 controlcenter/ControlCenter.qml
 NotificationPopups 1.0 notifications/NotificationPopups.qml
 NotificationCenter 1.0 notifications/NotificationCenter.qml
 LockScreen 1.0 lockscreen/LockScreen.qml
+Overview 1.0 overview/Overview.qml
+Customize 1.0 customize/Customize.qml
