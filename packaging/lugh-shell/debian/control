@@ -18,6 +18,7 @@ Depends: adwaita-icon-theme,
          pipewire-pulse,
          pulseaudio-utils,
          qml6-module-org-kde-layershell,
+         qml6-module-qtcore,
          qt6-wayland,
          slurp,
          upower,
@@ -28,8 +29,9 @@ Depends: adwaita-icon-theme,
          ${shlibs:Depends}
 Recommends: bluez, power-profiles-daemon, qml6-module-qtwebsockets
 Description: Lugh desktop shell
- The shell of the Lugh desktop: top bar, dock, launcher, notifications,
- control center, on-screen displays, lock screen and polkit agent, as one
- Qt 6 / QML process on a Wayland compositor with wlr-layer-shell.
+ The shell of the Lugh desktop: bottom panel, launcher, overview,
+ notifications, quick panel, customization, on-screen displays, lock
+ screen and polkit agent, as one Qt 6 / QML process on a Wayland
+ compositor with wlr-layer-shell.
  .
  Started by the lugh-session.target systemd user unit (package lugh-session).
