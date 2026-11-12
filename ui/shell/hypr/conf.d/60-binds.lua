@@ -8,6 +8,7 @@
 local shell  = require("lugh.shell")
 local window = require("lugh.window")
 local tiling = require("lugh.tiling")
+local workspaces = require("lugh.workspaces")
 
 local S = lugh.scripts
 
@@ -40,6 +41,7 @@ bind("SUPER + SPACE", shell.dsp("ShowLauncher", "s", ""),         "Search / laun
 bind("SUPER + TAB",   shell.dsp("ShowOverview"),                  "Overview")
 bind("SUPER + C",     shell.dsp("ToggleControlCenter"),           "Control center")
 bind("SUPER + N",     shell.dsp("ToggleNotificationCenter"),      "Notification center")
+bind("SUPER + B",     shell.dsp("FocusPanel"),                    "Focus the panel")
 
 -- Lock goes through logind: the shell's lock screen listens to the session's
 -- Lock signal, the same path used by idle and suspend.
@@ -87,14 +89,25 @@ hl.bind("SUPER + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
 ---------------------------------------------------------------------------
--- Workspaces: Ctrl+1..9 switch, Ctrl+Shift+1..9 move the window there.
+-- Workspaces: a rows × cols grid (default 2 × 2, lugh/workspaces.lua).
+-- Super+Ctrl+arrows: neighbouring workspace; + Shift: take the window along.
+-- Ctrl+1..9 switch, Ctrl+Shift+1..9 move the window there (grid only);
+-- Super+scroll: next / previous in grid order (never leaves the grid).
+-- Super+Tab (above) opens the shell's overview of the grid.
 ---------------------------------------------------------------------------
-for i = 1, 9 do
-    bind("CTRL + " .. i,         hl.dsp.focus({ workspace = i }),       "Workspace " .. i)
-    bind("CTRL + SHIFT + " .. i, hl.dsp.window.move({ workspace = i }), "Move window to workspace " .. i)
+workspaces.apply()
+for _, dir in ipairs({ "left", "right", "up", "down" }) do
+    bind("SUPER + CTRL + " .. dir, function() workspaces.go(dir) end,
+        "Workspace " .. dir)
+    bind("SUPER + CTRL + SHIFT + " .. dir, function() workspaces.move(dir) end,
+        "Move window to workspace " .. dir)
 end
-bind("SUPER + mouse_down", hl.dsp.focus({ workspace = "e+1" }), "Next workspace")
-bind("SUPER + mouse_up",   hl.dsp.focus({ workspace = "e-1" }), "Previous workspace")
+for i = 1, 9 do
+    bind("CTRL + " .. i,         function() workspaces.focus(i) end, "Workspace " .. i)
+    bind("CTRL + SHIFT + " .. i, function() workspaces.send(i) end,  "Move window to workspace " .. i)
+end
+bind("SUPER + mouse_down", function() workspaces.scroll(1) end,  "Next workspace")
+bind("SUPER + mouse_up",   function() workspaces.scroll(-1) end, "Previous workspace")
 
 ---------------------------------------------------------------------------
 -- Hardware keys: change the value, then show the shell's OSD.
