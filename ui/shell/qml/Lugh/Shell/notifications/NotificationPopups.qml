@@ -1,7 +1,9 @@
 // Notification toasts (docs/design/lugh-mode.md §3): compact floating glass
-// capsules under the status island, up to 3, newest on top, 8 px apart.
-// Content-sized: the frame anchors this item top-right (top = Theme.barHeight,
-// right 10) and sizes its layer window from implicitWidth / implicitHeight,
+// capsules in the top-right corner of the screen, up to 3, newest on top,
+// 8 px apart. Nothing here assumes a top bar.
+// Content-sized: the frame anchors this item top-right (its window adds a
+// small top padding, padTop, and 10 px on the right) and sizes its layer
+// window from implicitWidth / implicitHeight,
 // which include a small margin on the left and below for the shadows
 // (`padLeft`, `padBottom`: input-transparent, see `inputRects`).
 //
@@ -46,7 +48,7 @@ Item {
     readonly property int collapsedHeight: 46
     readonly property int gap: Theme.space8
     // Shadow room ("menu" level reaches 15 px left, 17 px below). Right and
-    // top fall into the frame's margin / the bar.
+    // top fall into the frame's padding (padRight / padTop).
     readonly property int padLeft: 14
     readonly property int padBottom: 18
     // Demo / tests: keep the newest toast expanded.
