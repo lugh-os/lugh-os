@@ -31,6 +31,12 @@ hl.config({
         -- windows that declare content type "game" (wp-content-type), where it
         -- is known to be safe; 1 can flicker on some drivers with other apps.
         direct_scanout = 2,
+
+        -- While a window grows (edge drag, snap, maximize) its app needs a
+        -- frame or two to send a bigger buffer. Meanwhile Hyprland extends
+        -- the buffer's edge pixels into the new area instead of stretching
+        -- the whole picture or leaving it black. (The default, set on purpose.)
+        expand_undersized_textures = true,
     },
 
     misc = {
@@ -44,7 +50,8 @@ hl.config({
         background_color          = "rgb(F7F6F3)",
 
         -- Interactive resizes and drags follow the pointer 1:1. Animating them
-        -- only adds latency and extra frames.
+        -- only adds latency, extra frames and a buffer that visibly lags the
+        -- frame (the "stretching" while resizing).
         animate_manual_resizes        = false,
         animate_mouse_windowdragging  = false,
 
