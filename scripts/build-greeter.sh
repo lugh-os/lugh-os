@@ -29,6 +29,7 @@ image="localhost/lugh-hello-env:$(sha256sum tests/toolchain/Containerfile | cut 
 if [[ "$engine" == podman && "$(id -u)" != 0 ]]; then owner=0:0; else owner="$(id -u):$(id -g)"; fi
 
 mkdir -p out/bin
+# shellcheck disable=SC2016  # the script expands inside the container
 "$engine" run --rm --init -v "$root:/src" -w /src \
   -v lugh-hello-rustup:/root/.rustup -v lugh-hello-cargo:/root/.cargo/registry \
   -e LANG=C.UTF-8 -e CARGO_TARGET_DIR=/src/out/greeter-target -e QMAKE=/usr/lib/qt6/bin/qmake \
