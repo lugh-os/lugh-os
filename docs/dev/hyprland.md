@@ -41,7 +41,7 @@ assumed when they were written):
 |---|---|---|
 | Config file | `hyprland.conf`, `source = …` | `lugh.lua`, `dofile()` / `require()` |
 | Window rules | `windowrulev2 = float, class:.*` (v1 removed in 0.48, v2 deprecated in 0.53) | `hl.window_rule({ name = …, match = { class = ".*" }, float = true })` |
-| Layer rules | `layerrule = blur, lugh-bar` | `hl.layer_rule({ match = { namespace = "^lugh-bar$" }, blur = true, ignore_alpha = 0.3 })` |
+| Layer rules | `layerrule = blur, lugh-dock` | `hl.layer_rule({ match = { namespace = "^lugh-dock$" }, blur = true, ignore_alpha = 0.55 })` |
 | Gestures | `gestures { workspace_swipe = true }` (removed in 0.51) | `hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })` |
 | Shadows | `drop_shadow = true` (removed in 0.45) | `decoration.shadow = { enabled, range, render_power, color }` |
 | VFR | `misc:vfr` | `debug.vfr` |
@@ -83,7 +83,9 @@ ui/shell/hypr/                      ->  /usr/share/lugh/hypr/
 ├── lugh/                           Lua modules (require "lugh.x")
 │   ├── shell.lua                   D-Bus calls to space.lugh.Shell1 via busctl
 │   ├── tiling.lua                  per-workspace tiling (Super+T)
-│   └── window.lua                  snap halves, minimize, Alt+Tab, Alt+`
+│   ├── titlebars.lua               loads and styles Lugh's hyprbars build (§4)
+│   ├── window.lua                  snap halves, clamp, minimize, Alt+Tab, Alt+`
+│   └── workspaces.lua              rows × cols workspace grid (Super+Ctrl+arrows, Super+scroll)
 ├── scripts/
 │   ├── media-key.sh                volume / mic / brightness / media / caps lock + OSD
 │   ├── launch.sh                   start an app in app-lugh-<id>-<rand>.scope (ADR-015)
@@ -117,14 +119,16 @@ Hyprland's error bar with file and line, like any config error.
 
 A global table `lugh` holds the helpers: `lugh.apps` (terminal, files, settings,
 tasks: override in `user.lua`, e.g. `lugh.apps.terminal = "kitty"`),
-`lugh.tiling`, `lugh.window`, `lugh.rules.shell_noanim`, `lugh.low_power`,
-`lugh.session`.
+`lugh.tiling`, `lugh.window`, `lugh.workspaces` (grid size from `[shell]
+workspaceRows/Cols/Wrap`, or `set_grid(r, c[, wrap])` in `user.lua`),
+`lugh.titlebars`, `lugh.anim.workspaces_axis("vertical"|"horizontal")`,
+`lugh.rules.shell_noanim`, `lugh.low_power`, `lugh.session`.
 
 ### Layer-shell namespaces expected from the shell
 
 | Namespace | Blur | Notes |
 |---|---|---|
-| `lugh-bar`, `lugh-dock`, `lugh-launcher`, `lugh-controlcenter`, `lugh-notifications`, `lugh-notification-center`, `lugh-menu`, `lugh-osd` | yes, `ignore_alpha 0.3` | glass; pixels below 30 % alpha (margins, QML shadows) aren't blurred |
+| `lugh-dock` (the bottom panel), `lugh-launcher`, `lugh-overview`, `lugh-customize`, `lugh-controlcenter` (quick panel), `lugh-notifications`, `lugh-notification-center`, `lugh-menu`, `lugh-osd` | yes, `ignore_alpha 0.55` | glass; pixels below 55 % alpha (margins, baked QML shadows, which peak at 0.28, or 0.48 where two overlap) aren't blurred. Every `^lugh-.+$` layer is `no_anim`: the QML does the motion |
 | `lugh-wallpaper` | no | `no_anim` (no fade in/out during shell restarts) |
 | `lugh-lock` | no | `no_anim`; the lock itself is `ext-session-lock` |
 
@@ -137,8 +141,9 @@ The Lugh column of the shell spec's shortcut table. "D-Bus" means
 |---|---|---|
 | Super+Space | Launcher | D-Bus `ShowLauncher s ""` |
 | Super+Tab, 4-finger swipe up | Overview | D-Bus `ShowOverview` |
-| Super+C | Control center | D-Bus `ToggleControlCenter` |
+| Super+C | Quick panel (clock, calendar, controls) | D-Bus `ToggleControlCenter` |
 | Super+N | Notification center | D-Bus `ToggleNotificationCenter` |
+| Super+B | Focus the panel (keyboard navigation, Esc gives it back) | D-Bus `FocusPanel` |
 | Super+L | Lock | `loginctl lock-session` → the shell handles logind's `Lock` signal |
 | Print / Shift+Print / Alt+Print | Screenshot area / screen / window | D-Bus `Screenshot s area\|screen\|window` |
 | Alt+Tab / Alt+Shift+Tab | Next / previous window (raised) | `cycle_next` + `bring_to_top` |
@@ -150,9 +155,11 @@ The Lugh column of the shell spec's shortcut table. "D-Bus" means
 | Super+← / → | Snap to left / right half (floating); move focus (tiled) | `lugh.window.snap` |
 | Super+Shift+arrows | Move window | `hl.dsp.window.move{direction}` |
 | Super+T | Toggle tiling on this workspace | `lugh.tiling.toggle` |
-| Ctrl+1…9 / 3-finger swipe | Workspace 1…9 / previous–next | `hl.dsp.focus{workspace}` / gesture |
-| Ctrl+Shift+1…9 | Move window to workspace | `hl.dsp.window.move{workspace}` |
-| Super+scroll | Next / previous workspace | |
+| Ctrl+1…9 / 3-finger swipe | Workspace 1…9 (only inside the rows × cols grid) / previous–next | `lugh.workspaces.focus` / gesture |
+| Ctrl+Shift+1…9 | Move window to workspace (grid only) | `lugh.workspaces.send` |
+| Super+Ctrl+arrows | Neighbouring workspace in the grid (default 2 × 2, `[shell] workspaceRows/Cols/Wrap`) | `lugh.workspaces.go` |
+| Super+Ctrl+Shift+arrows | Move the focused window there and follow | `lugh.workspaces.move` |
+| Super+scroll | Next / previous workspace in grid order (wraps only with `workspaceWrap`; from past the grid, back to its last workspace) | `lugh.workspaces.scroll` |
 | Ctrl+Alt+T | Terminal | `xdg-terminal-exec`, else `foot` (in a scope) |
 | Super+E | Files | `pcmanfm-qt` (in a scope) |
 | Super+, | Settings | `lugh-settings` if installed (Phase 2), else the control center |
@@ -171,6 +178,7 @@ Super+Shift+Q (quarantine) arrives in Phase 4.
 - `ShowOverview()`
 - `ToggleControlCenter()`
 - `ToggleNotificationCenter()`
+- `FocusPanel()`: the panel takes the keyboard (QML signal `shell.focusPanel()`)
 - `Screenshot(s mode)`: `area` | `screen` | `window`
 - `ShowOSD(s kind, d value)` with these kinds: `volume` (0.0–1.5),
   `volume-muted` (the level while muted), `microphone` (1 live / 0 muted),
@@ -201,17 +209,44 @@ workspace and focuses it.
 
 | Leaf | Speed | Style |
 |---|---|---|
-| windowsIn / windowsOut | 3 | popin 94 % / popin 96 % |
-| windowsMove, fadeIn, fadeOut | 3 | |
-| layersIn / fadeLayersIn | 2.4 | fade |
-| layersOut / fadeLayersOut | 1.8 | fade |
-| workspaces | 3 | slide |
-| specialWorkspace | 3 | slidevert |
+| windowsIn / windowsOut | 2.6 / 2.0 | popin 95 % / popin 97 % |
+| windowsMove | 2.2 | (snap, maximize) |
+| fadeIn / fadeOut | 2.6 / 2.0 | |
+| layersIn / fadeLayersIn | 2.2 | fade |
+| layersOut / fadeLayersOut | 1.6 | fade |
+| workspaces | 2.8 | slidefade 20 % (`lugh.workspaces` switches to slide / slidevert for one-axis grid moves) |
+| specialWorkspace | 2.6 | slidefadevert 20 % |
 | fadeSwitch, fadeShadow, fadeDim | 1.8 | |
-| fadePopups, border | 1.2 | |
+| fadePopups, border | 1.5 | |
+| zoomFactor | 2.4 | |
+| borderangle | off | |
+
+  Exits are shorter than entrances; nothing overshoots.
 
   Springs (DESIGN-SYSTEM's stiffness 400 / damping 32) aren't used yet, because
   their Lua field name changed between 0.55 and 0.57.
+- **Title bars.** Hyprland 0.55 answers every xdg-decoration request with
+  "server side" but draws nothing, so Lugh ships `lugh-hyprbars`: hyprbars
+  built against the exact Hyprland in the archive
+  (`/usr/lib/lugh/hyprland/hyprbars.so`, plus a `.hyprland-version` stamp),
+  patched to draw a bar only on windows that don't decorate themselves.
+  `lugh/titlebars.lua` loads it from `10-look.lua` and styles it: 26 px, Inter
+  10, theme surface/text colours from `desktop.toml`, buttons on the right in
+  the `[shell] titlebarButtons` order, top corners at the window rounding.
+  `appearance.rs` runs `hyprctl reload config-only` when the theme or the
+  button order changes. Without the plugin, with a version mismatch, or with
+  `LUGH_TITLEBARS=0`, nothing loads and `00-env.lua` keeps Qt client-side.
+
+| Toolkit / app | Title bar |
+|---|---|
+| GTK 3/4, libadwaita (`GTK_CSD=1`) | its own header bar; Lugh's `gtk.css` (in `/usr/share/lugh/xdg`, first in `XDG_CONFIG_DIRS`) makes it compact and drops the GTK shadow |
+| Firefox | its own (tabs in the title bar) |
+| Qt 6 (`QT_WAYLAND_DECORATION=adwaita` as the fallback) | Lugh bar |
+| Qt 5 (VLC), foot, mpv, kitty, Alacritty, X11 apps without a frame | Lugh bar |
+| Chromium / Electron | own frame by default; Lugh bar with "Use system title bar" (`/etc/chromium.d/lugh` sets `--ozone-platform-hint=auto`) |
+
+  `lugh.window.clamp` (new windows, monitor changes) and `snap` leave room for
+  the bar above the window, since hyprbars draws it outside the window box.
 - The shell owns the motion of its own surfaces (QML liquid motion): the
   rule `lugh.rules.shell_noanim` turns compositor animations off for the
   `lugh-*` layers. `lugh.rules.shell_noanim:set_enabled(false)` in `user.lua`
@@ -240,7 +275,7 @@ Every choice is commented in `conf.d/30-performance.lua`.
 
 **Expected GPU cost** (1080p60, Intel Xe iGPU class; rough numbers, to be
 measured in Phase 1 testing): idle ≈ 0. Rounding + shadows cost ~0.1–0.3 ms per
-frame while windows redraw. Blur under the bar and dock costs ~0.3–0.8 ms per
+frame while windows redraw. Blur under the panel costs ~0.3–0.8 ms per
 frame, and only when what is behind them changes. A large launcher or control
 center open over a playing video costs ~1–2 ms per frame. Animations cost only
 while they run. Older iGPUs (Gen9 and earlier) and software rendering should use
@@ -355,7 +390,9 @@ Decisions:
 | `brightnessctl` | brightness keys (uses logind, no root) |
 | `playerctl` | media keys (optional: skipped if missing) |
 | `adwaita-icon-theme` | cursor theme |
-| `qt6-wayland` | Qt apps and the shell on Wayland |
+| `qt6-wayland` (≥ 6.8, for the Adwaita decoration plugin) | Qt apps and the shell on Wayland |
+| `lugh-hyprbars` (Recommends of `lugh-session`; `Depends: hyprland (= the version it was built against)`) | server-side title bars (§4) |
+| `dconf-gsettings-backend`, `gsettings-desktop-schemas` | GTK button layout and dark mode via the Settings portal |
 | `xdg-terminal-exec`, `foot`, `pcmanfm-qt` | default terminal and Files |
 
 ## 8. Testing
@@ -404,16 +441,22 @@ A full session (greeter → `lugh-session`) is tested in QEMU from the ISO.
   session start-up haven't run in a real session, because no headless parent
   compositor in the build containers supports the `xdg_wm_base` v6 that 0.55
   needs. The first nested run should check them.
-- **Snap halves** compute the usable area from the `lugh-bar` / `lugh-dock`
-  layer geometry, because the 0.55 Lua API exposes no reserved area. It
-  assumes the bar is at the top.
+- **Snap halves** compute the usable area from the `lugh-dock` (bottom panel)
+  layer geometry, because the 0.55 Lua API exposes no reserved area. With
+  auto-hide on, snapped windows still leave a panel-height gap.
+- **`lugh-hyprbars` is tied to one Hyprland build.** It must be rebuilt
+  whenever trixie-backports moves Hyprland; until then apt holds Hyprland
+  back and the ISO build fails on the unsatisfiable package. Without the
+  plugin, foot (server-side by default) has no title bar and Qt 6's own
+  Adwaita bar returns, with a faint shadow of its own.
 - **Minimize** is a special workspace: Hyprland has no minimized state. The
-  dock must restore windows by moving them back.
+  panel must restore windows by moving them back.
 - **Ctrl+1…9** (workspace switching, per the spec) shadows apps' own Ctrl+number
   shortcuts (browser tabs). This is a spec decision to revisit with user
   testing.
-- Window buttons and decorations are client-side (shell spec: not consistent
-  across toolkits until Phase 5).
+- Title bars still differ by toolkit: GTK, libadwaita and Firefox draw their
+  own header bars, everything else gets the Lugh bar (§4). One consistent
+  decoration comes with lugh-compositor (Phase 5).
 - `xwayland.force_zero_scaling` makes XWayland apps crisp but small on HiDPI,
   unless they honor `GDK_SCALE` / `QT_SCALE_FACTOR`.
 - `desktop-file-validate` flags `DesktopNames` in `lugh.desktop`. That key is
