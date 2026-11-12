@@ -4,3 +4,6 @@ ui/shell/session/lugh-session
 ui/shell/session/lugh.desktop
 docs/dev/hyprland.md
 ui/shell/session/lugh-xdg-terminals.list
+ui/shell/session/90_lugh-session.gschema.override
+ui/shell/session/xdg
+ui/shell/session/chromium.d
