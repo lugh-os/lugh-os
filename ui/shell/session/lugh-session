@@ -30,9 +30,9 @@ LUGH_HYPR_CONFIG=${LUGH_HYPR_CONFIG:-/usr/share/lugh/hypr/lugh.lua}
 # OLDPWD, ...) leaks into every user service, and nothing stale survives.
 SESSION_VARS="WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP DESKTOP_SESSION
-XDG_SESSION_ID XDG_SEAT XDG_VTNR LUGH_SESSION LUGH_LOW_POWER
+XDG_CONFIG_DIRS XDG_SESSION_ID XDG_SEAT XDG_VTNR LUGH_SESSION LUGH_LOW_POWER
 XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_SIZE
-QT_QPA_PLATFORM QT_WAYLAND_DISABLE_WINDOWDECORATION GDK_BACKEND
+QT_QPA_PLATFORM QT_WAYLAND_DISABLED_INTERFACES QT_WAYLAND_DECORATION GDK_BACKEND GTK_CSD
 MOZ_ENABLE_WAYLAND ELECTRON_OZONE_PLATFORM_HINT _JAVA_AWT_WM_NONREPARENTING"
 
 # Removed from the user manager when the session ends (they point at a
@@ -47,7 +47,7 @@ have() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Session identity, needed before the compositor starts. The toolkit
+# Session identity and app defaults, needed before the compositor starts. The toolkit
 # variables (Qt, GTK, cursor, ...) are set by the compositor config
 # (conf.d/00-env.lua) so nested test sessions get them too.
 set_env() {
@@ -56,6 +56,56 @@ set_env() {
     export XDG_SESSION_DESKTOP=lugh
     export DESKTOP_SESSION=lugh
     export LUGH_SESSION=1
+    xdg_config_dirs
+}
+
+# Lugh's system-wide app defaults (GTK settings.ini and gtk.css, foot.ini),
+# shipped by lugh-session. They live outside /etc/xdg so they only apply in a
+# Lugh session, and come first in XDG_CONFIG_DIRS so they win over other
+# system defaults; any file in the user's own ~/.config still wins over them.
+LUGH_XDG_DIR=/usr/share/lugh/xdg
+
+xdg_config_dirs() {
+    dirs=${XDG_CONFIG_DIRS:-/etc/xdg}
+    case ":$dirs:" in
+        *":$LUGH_XDG_DIR:"*) ;;
+        *) dirs="$LUGH_XDG_DIR:$dirs" ;;
+    esac
+    export XDG_CONFIG_DIRS="$dirs"
+}
+
+# GTK reads gtk.css from the user's config dir only. Put an @import of Lugh's
+# file at the top of ~/.config/gtk-{3,4}.0/gtk.css, once per user (a stamp
+# file remembers it, so removing the line later is respected), keeping the
+# user's own rules below it. A missing gtk.css is created with the import.
+import_gtk_css() {
+    config=${XDG_CONFIG_HOME:-$HOME/.config}
+    state=${XDG_STATE_HOME:-$HOME/.local/state}/lugh
+    for v in 3 4; do
+        system="$LUGH_XDG_DIR/gtk-$v.0/gtk.css"
+        user="$config/gtk-$v.0/gtk.css"
+        stamp="$state/gtk-$v.0-css-imported"
+        [ -r "$system" ] || continue
+        [ -e "$stamp" ] && continue
+        line="@import url(\"file://$system\");"
+        mkdir -p "$config/gtk-$v.0" "$state" || continue
+        if [ -L "$user" ]; then
+            : # a link (dotfiles manager): leave it alone
+        elif [ ! -e "$user" ]; then
+            printf '%s\n' "$line" > "$user" || continue
+        elif ! grep -qF "$system" "$user"; then
+            tmp="$user.lugh-tmp.$$"
+            # Rewritten in place (cat >): same file, owner and mode.
+            if { printf '%s\n' "$line"; cat "$user"; } > "$tmp" && cat "$tmp" > "$user"; then
+                rm -f "$tmp"
+            else
+                rm -f "$tmp"
+                continue
+            fi
+        fi
+        : > "$stamp"
+    done
+    return 0
 }
 
 # Only the variables of SESSION_VARS that are set in this environment.
@@ -143,6 +193,8 @@ run() {
         log "stopping a leftover lugh-session.target"
         stop_session
     fi
+
+    import_gtk_css
 
     if [ ! -r "$LUGH_HYPR_CONFIG" ]; then
         log "config not found: $LUGH_HYPR_CONFIG"
