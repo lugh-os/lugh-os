@@ -28,15 +28,25 @@ Output:
 
 | Shot | Action | Checked inside the guest |
 |---|---|---|
-| `01-desktop.png` | boot, greetd `initial_session` autologin | `LUGH-MARK: session-ready` on serial; user session active; `lugh-shell.service` active; `space.lugh.Shell1` on the bus; `lugh-bar`, `lugh-dock`, `lugh-wallpaper` layers mapped |
+| `01-desktop.png` | boot, greetd `initial_session` autologin | `LUGH-MARK: session-ready` on serial; user session active; `lugh-shell.service` active; `space.lugh.Shell1` on the bus; `lugh-dock` and `lugh-wallpaper` mapped, no `lugh-bar`; the monitor reserves a bottom strip; `hyprctl plugin list` has hyprbars when `lugh-hyprbars` is installed |
 | `02-launcher.png` | Super+Space | `lugh-launcher` layer mapped |
 | `03-launcher-results.png` | type `fire` | — (look at the picture), then Esc closes it |
 | `04-controlcenter.png` | Super+C | `lugh-controlcenter` layer mapped, Esc unmaps it |
 | `05-notifications.png` | Super+N | `lugh-notification-center` layer mapped |
 | `06-toast.png` | `notify-send` in the guest | `lugh-notifications` layer mapped |
+| `15-overview.png` | Super+Tab | `lugh-overview` layer mapped, Esc unmaps it |
+| `16-workspace-2.png` | Super+Ctrl+Right, then Super+Ctrl+Left | `hyprctl activeworkspace` is 2, then 1 |
+| `17-panel-focus.png`, `17b-panel-enter.png` | Super+B, then Enter | Enter on the focused start button maps `lugh-menu` |
 | `07-lock.png` | Super+L | the session reports locked |
 | `08-unlocked.png` | type the password, Enter | no longer locked |
-| `11-foot.png` | start `foot` through `launch.sh` | a foot window exists and sits in an `app-lugh-*.scope` |
+| `11-foot.png` | Ctrl+Alt+T (`launch.sh`) | a foot window exists and sits in an `app-lugh-*.scope`; with hyprbars, `hyprctl decorations` lists a bar on it |
+| `18-foot-maximized.png` | Super+Up | the window lies inside the monitor minus its reserved panel strip (and title bar room) |
+| `19-foot-snapped.png` | Super+Up again, Super+Left | the same, for the left half |
+| `20-huge-clamped.png` | `foot -W 400x150` | the oversized floating window was shrunk into the usable area |
+| `12-firefox.png` | Super+Space, `fire`, Enter | a Firefox window in a scope; it draws its own frame (no hyprbars bar) |
+| `21-files.png` | Super+E | a pcmanfm-qt (Qt 6) window, with a hyprbars bar |
+| `13-osd-volume.png` | Volume Down twice | the sink volume changed |
+| — | after the app steps | no QML warning (`*.qml:N` / `*.js:N` lines) in `lugh-shell`'s journal |
 | — | `systemctl --user kill -s KILL lugh-shell` | the bar is back, foot survived |
 | — | 10 s idle sample | `lugh-shell` CPU and RSS (reported, not asserted) |
 | `09-greeter.png` | log out (`hl.dsp.exit()`) | `LUGH-MARK: greeter-ready` on serial; `cage` and `lugh-greeter` run as `_greetd` |
