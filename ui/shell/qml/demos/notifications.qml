@@ -1,6 +1,7 @@
-// Notifications demo (Lugh mode): wallpaper, stand-in islands, the toast
-// capsules under the status island and, optionally, the notification center
-// growing out of the center island.
+// Notifications demo (Lugh mode): wallpaper, a stand-in bottom panel with
+// the tray at its right end, the toast capsules in the top-right corner and,
+// optionally, the notification center popping out of the tray (bottom-right,
+// above the panel).
 //
 //   scripts/qml-shot.sh ui/shell/qml/demos/notifications.qml /tmp/out.png 1440 900 900 -- [flags]
 //   --dark              dark theme
@@ -121,35 +122,41 @@ Item {
         sourceComponent: Wallpaper { source: demo.wall("2560x1600") }
     }
 
-    // Stand-ins for the bar's islands.
-    Island {
-        id: centerIsland
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: Theme.islandMargin
-        text: "Notifications and calendar"
-        active: ShellState.notificationCenterOpen
-        onClicked: ShellState.toggleNotificationCenter()
-        onSceneRectChanged: ShellState.centerIsland = sceneRect
-        Component.onCompleted: ShellState.centerIsland = sceneRect
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: Services.clock.date + " · " + Services.clock.time
-            font: Theme.typeLabelTnum
-            color: Theme.text
+    // Stand-in bottom panel with the tray (status icons + clock).
+    GlassPanel {
+        id: panel
+        x: 8
+        y: demo.height - height - 8
+        width: demo.width - 16
+        height: 48
+        radius: Theme.radiusLg
+        elevation: "menu"
+
+        Island {
+            id: tray
+            anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+            text: "Notifications"
+            active: ShellState.notificationCenterOpen
+            onClicked: ShellState.toggleNotificationCenter()
+            onSceneRectChanged: ShellState.statusIsland = sceneRect
+            Component.onCompleted: ShellState.statusIsland = sceneRect
+            Icon { name: "wifi"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Icon { name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Icon { name: "battery-medium"; size: 16; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: Services.clock.time
+                font: Theme.typeLabelTnum
+                color: Theme.text
+            }
         }
     }
-    Island {
-        anchors { right: parent.right; rightMargin: Theme.islandSideMargin }
-        y: Theme.islandMargin
-        text: "Control center"
-        Icon { name: "wifi"; size: 16; anchors.verticalCenter: parent.verticalCenter }
-        Icon { name: "volume-2"; size: 16; anchors.verticalCenter: parent.verticalCenter }
-        Icon { name: "battery-medium"; size: 16; anchors.verticalCenter: parent.verticalCenter }
-    }
+    Binding { target: ShellState; property: "panelReserved"; value: 60 }
 
+    // Top-right corner, as the frame places it (padTop 10, 10 px from the right).
     NotificationPopups {
         id: popups
-        anchors { top: parent.top; topMargin: Theme.barHeight; right: parent.right; rightMargin: Theme.islandSideMargin }
+        anchors { top: parent.top; topMargin: 10; right: parent.right; rightMargin: 10 }
         visible: shown
     }
 
