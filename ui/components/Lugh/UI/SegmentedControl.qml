@@ -15,6 +15,8 @@ import QtQuick.Templates as T
 T.Control {
     id: root
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property var model: []
     property int currentIndex: 0
 
@@ -32,7 +34,11 @@ T.Control {
         activated(i);
     }
 
+    // Bumped as delegates are created: Repeater's count changes before its
+    // items exist, so without it the width would stay at the 48 px minimum.
+    property int _built: 0
     implicitWidth: {
+        void _built;
         let w = 0;
         for (let i = 0; i < rep.count; ++i) {
             const it = rep.itemAt(i);
@@ -60,7 +66,7 @@ T.Control {
     }
 
     Accessible.role: Accessible.PageTabList
-    Accessible.name: _count > 0 && currentIndex >= 0 ? _text(currentIndex) : ""
+    Accessible.name: accessibleName !== "" ? accessibleName : _count > 0 && currentIndex >= 0 ? _text(currentIndex) : ""
 
     background: Rectangle {
         radius: Theme.radiusSm + root._pad + 2
@@ -125,6 +131,7 @@ T.Control {
         Repeater {
             id: rep
             model: root._count
+            onItemAdded: root._built += 1
 
             Item {
                 id: seg
