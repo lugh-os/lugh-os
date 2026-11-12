@@ -10,13 +10,14 @@ for dm in gdm3 sddm lightdm lxdm xdm slim ly; do
 	fi
 done
 
-for pkg in greetd cage hyprland lugh-shell lugh-greeter lugh-session; do
+for pkg in greetd cage hyprland lugh-shell lugh-greeter lugh-session lugh-hyprbars; do
 	dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" || {
 		echo "E: lugh-desktop: $pkg is not installed" >&2
 		exit 1
 	}
 done
 echo "I: lugh-desktop: hyprland $(dpkg-query -W -f='${Version}' hyprland)"
+test -e /usr/lib/lugh/hyprland/hyprbars.so || { echo "E: lugh-desktop: lugh-hyprbars ships no hyprbars.so" >&2; exit 1; }
 
 systemctl enable greetd.service
 systemctl set-default graphical.target
