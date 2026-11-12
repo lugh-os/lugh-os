@@ -1,5 +1,5 @@
-// OSD demo: there is no OSD surface in Lugh mode; the center island is the
-// OSD. This shows the islands (demos/bar.qml) with one OSD request up.
+// OSD demo: there is no OSD surface in Lugh mode; the Panel's tray is the
+// OSD. This shows the panel (demos/panel.qml) with one OSD request up.
 //
 //   QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh ui/shell/qml/demos/osd.qml \
 //       /tmp/lugh-shots/osd/volume-light.png 1440 900 600 [-- flags]
@@ -7,7 +7,7 @@
 //   --value <0..1>    level, or 1 = on / 0 = off for toggles (default 0.62)
 //   --muted           volume muted
 //   --cycle           re-request every 600 ms through all kinds (manual check)
-//   plus every flag of demos/bar.qml (--dark, --accent <name>, --reduce-motion, …)
+//   plus every flag of demos/panel.qml (--dark, --accent <name>, --reduce-motion, …)
 // The request times out after 1.2 s: keep the shot delay under that.
 import QtQuick
 import Lugh.UI
@@ -24,7 +24,7 @@ Item {
 
     Loader {
         anchors.fill: parent
-        source: "bar.qml"
+        source: "panel.qml"
         onLoaded: {
             Services.audio.muted = demo.flag("--muted");
             Services.osd.show(demo.arg("--kind", "volume"), Number(demo.arg("--value", 0.62)));
