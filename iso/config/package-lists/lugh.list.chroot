@@ -1,2 +1,5 @@
 lugh-branding
 lugh-desktop-minimal
+# Title bars for apps without their own (foot, mpv, Qt, X11). Pinned to the
+# exact Hyprland of backports.list: rebuild it when Hyprland moves.
+lugh-hyprbars
