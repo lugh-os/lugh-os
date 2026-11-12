@@ -1,9 +1,14 @@
 //! `Services.session`: who is logged in, the lock, and power actions.
 //!
 //! State: `userName`, `realName`, `avatar`, `hostName`, `osVersion`,
-//! `locked`, `authenticating`, `authError`, `canSuspend`, `lastError`.
+//! `locked`, `authenticating`, `authError`, `canSuspend`, `lastError`,
+//! `idleInhibited`.
 //! Methods: `lock()`, `unlock(password)`, `logout()`, `restart()`,
-//! `shutdown()`, `suspend()`. Signal: `unlocked()`.
+//! `shutdown()`, `suspend()`, `setIdleInhibit(on)`. Signal: `unlocked()`.
+//!
+//! "Keep awake" (`setIdleInhibit(true)`) holds a logind *block* inhibitor for
+//! `idle`; `idleInhibited` is true exactly while it is held. When logind
+//! refuses, `idleInhibited` stays false and `lastError` says why.
 //!
 //! The lock (ADR-029) is decided by the pure state machine in
 //! [`lock`]; this file only carries out its effects:
@@ -20,14 +25,17 @@
 //! Nothing here polls: timers exist only while a retry delay is running.
 
 use std::fmt;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt as _;
 use serde_json::{Map, Value, json};
+use zbus::zvariant::OwnedFd;
 
-use super::{CallError, Context, Service, Sink};
+use super::{CallError, Context, Service, Sink, args};
 use crate::wm::hyprland::HyprlandAdapter;
 
 mod auth;
@@ -53,6 +61,7 @@ pub fn start(ctx: &Context) -> Box<dyn Service> {
         ctx.sink.clone(),
         ctx.runtime.clone(),
         auth::system(),
+        Arc::new(LogindIdle),
         Box::new(FileFlag::from_env(me.uid)),
         me,
         avatar,
@@ -130,6 +139,34 @@ impl FlagStore for FileFlag {
     }
 }
 
+// ---- "keep awake" -----------------------------------------------------------
+
+type InhibitFuture<'a> = Pin<Box<dyn Future<Output = zbus::Result<OwnedFd>> + Send + 'a>>;
+
+/// Where the idle inhibitor comes from (logind; a fake in tests).
+trait IdleInhibitor: Send + Sync + fmt::Debug {
+    /// Takes the inhibitor; it is released when the descriptor is dropped.
+    fn inhibit<'a>(&'a self, inner: &'a Inner) -> InhibitFuture<'a>;
+}
+
+/// `org.freedesktop.login1.Manager.Inhibit("idle", …, "block")`.
+#[derive(Debug)]
+struct LogindIdle;
+
+impl IdleInhibitor for LogindIdle {
+    fn inhibit<'a>(&'a self, inner: &'a Inner) -> InhibitFuture<'a> {
+        Box::pin(async move { inner.logind().await?.inhibit_idle().await })
+    }
+}
+
+/// The held inhibitor. `generation` counts `setIdleInhibit` calls, so an
+/// answer that arrives after a newer call is dropped instead of stored.
+#[derive(Debug, Default)]
+struct Idle {
+    generation: u64,
+    fd: Option<OwnedFd>,
+}
+
 // ---- the service ------------------------------------------------------------
 
 /// State that changes outside the lock machine.
@@ -144,10 +181,12 @@ struct Inner {
     sink: Sink,
     runtime: tokio::runtime::Handle,
     auth: Arc<dyn Authenticator>,
+    idle_source: Arc<dyn IdleInhibitor>,
     flag: Box<dyn FlagStore>,
     me: Identity,
     machine: Mutex<LockMachine>,
     extra: Mutex<Extra>,
+    idle: Mutex<Idle>,
     logind: tokio::sync::OnceCell<Logind>,
 }
 
@@ -187,6 +226,7 @@ impl Inner {
         sink: Sink,
         runtime: tokio::runtime::Handle,
         auth: Arc<dyn Authenticator>,
+        idle_source: Arc<dyn IdleInhibitor>,
         flag: Box<dyn FlagStore>,
         me: Identity,
         avatar: String,
@@ -196,6 +236,7 @@ impl Inner {
             sink,
             runtime,
             auth,
+            idle_source,
             flag,
             me,
             machine: Mutex::new(machine),
@@ -203,6 +244,7 @@ impl Inner {
                 avatar,
                 ..Extra::default()
             }),
+            idle: Mutex::new(Idle::default()),
             logind: tokio::sync::OnceCell::new(),
         })
     }
@@ -210,6 +252,7 @@ impl Inner {
     fn state(&self) -> Value {
         let view = guard(&self.machine).view();
         let extra = guard(&self.extra);
+        let idle_inhibited = guard(&self.idle).fd.is_some();
         json!({
             "userName": self.me.user_name,
             "realName": self.me.real_name,
@@ -221,6 +264,7 @@ impl Inner {
             "authError": view.auth_error,
             "canSuspend": extra.can_suspend,
             "lastError": extra.last_error,
+            "idleInhibited": idle_inhibited,
         })
     }
 
@@ -322,6 +366,47 @@ impl Inner {
             if let Err(e) = result {
                 tracing::error!(?action, %e, "power request failed");
                 inner.set_last_error(format!("{}: {}", power_failure(action), reason(&e)));
+            }
+        });
+    }
+
+    /// "Keep awake": takes or drops the idle inhibitor. Always patches
+    /// `idleInhibited` with the outcome (the UI flips it optimistically).
+    fn set_idle_inhibit(self: &Arc<Self>, on: bool) {
+        let mut idle = guard(&self.idle);
+        idle.generation += 1;
+        if !on || idle.fd.is_some() {
+            if !on && idle.fd.take().is_some() {
+                tracing::info!("keep awake off: idle inhibitor released");
+            }
+            self.sink.patch(NAME, json!({ "idleInhibited": on }));
+            return;
+        }
+        let generation = idle.generation;
+        drop(idle);
+        let inner = Arc::clone(self);
+        self.runtime.spawn(async move {
+            inner.set_last_error(String::new());
+            let taken = inner.idle_source.inhibit(&inner).await;
+            let mut idle = guard(&inner.idle);
+            if idle.generation != generation {
+                return; // a newer call decided; a late descriptor is dropped here
+            }
+            match taken {
+                Ok(fd) => {
+                    idle.fd = Some(fd);
+                    tracing::info!("keep awake on: idle inhibitor held");
+                    inner.sink.patch(NAME, json!({ "idleInhibited": true }));
+                }
+                Err(e) => {
+                    inner.sink.patch(NAME, json!({ "idleInhibited": false }));
+                    drop(idle);
+                    tracing::warn!(%e, "no idle inhibitor");
+                    inner.set_last_error(format!(
+                        "Could not keep the computer awake: {}",
+                        reason(&e)
+                    ));
+                }
             }
         });
     }
@@ -546,6 +631,7 @@ impl Service for SessionService {
             "restart" => inner.power(PowerAction::Reboot),
             "shutdown" => inner.power(PowerAction::PowerOff),
             "suspend" => inner.power(PowerAction::Suspend),
+            "setIdleInhibit" => inner.set_idle_inhibit(args::bool(a, 0)?),
             other => return Err(CallError::UnknownMethod(format!("{NAME}.{other}"))),
         }
         Ok(Value::Null)
@@ -582,10 +668,33 @@ mod tests {
         }
     }
 
+    /// Hands out `/dev/null` as the inhibitor, or fails like a refusing
+    /// logind when `broken`.
+    #[derive(Debug, Default)]
+    struct FakeIdle {
+        calls: AtomicUsize,
+        broken: AtomicBool,
+    }
+
+    impl IdleInhibitor for FakeIdle {
+        fn inhibit<'a>(&'a self, _inner: &'a Inner) -> InhibitFuture<'a> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let broken = self.broken.load(Ordering::SeqCst);
+            Box::pin(async move {
+                if broken {
+                    return Err(zbus::Error::Failure("Access denied".into()));
+                }
+                let file = std::fs::File::open("/dev/null").map_err(zbus::Error::from)?;
+                Ok(OwnedFd::from(std::os::fd::OwnedFd::from(file)))
+            })
+        }
+    }
+
     struct Rig {
         svc: SessionService,
         events: mpsc::Receiver<Event>,
         auth: Arc<FakeAuth>,
+        idle: Arc<FakeIdle>,
         flag_path: PathBuf,
         _dir: tempfile::TempDir,
         _rt: tokio::runtime::Runtime,
@@ -610,6 +719,7 @@ mod tests {
             let _ = tx.send(e);
         });
         let auth = Arc::new(FakeAuth::default());
+        let idle = Arc::new(FakeIdle::default());
         let me = Identity {
             uid: 1000,
             user_name: "amara".into(),
@@ -622,6 +732,7 @@ mod tests {
             sink,
             rt.handle().clone(),
             Arc::clone(&auth) as Arc<dyn Authenticator>,
+            Arc::clone(&idle) as Arc<dyn IdleInhibitor>,
             Box::new(flag),
             me,
             String::new(),
@@ -630,6 +741,7 @@ mod tests {
             svc: SessionService(inner),
             events,
             auth,
+            idle,
             flag_path,
             _dir: dir,
             _rt: rt,
@@ -678,6 +790,7 @@ mod tests {
                 "authError": "",
                 "canSuspend": false,
                 "lastError": "",
+                "idleInhibited": false,
             })
         );
         assert_eq!(r.svc.name(), "session");
@@ -855,6 +968,45 @@ mod tests {
             json!({ "lastError": "Could not restart: no" })
         );
         assert_eq!(r.svc.state()["lastError"], "Could not restart: no");
+    }
+
+    #[test]
+    fn keep_awake_holds_and_releases_the_inhibitor() {
+        let r = rig(false);
+        r.call("setIdleInhibit", &[json!(true)]);
+        assert_eq!(r.next_patch(), json!({ "idleInhibited": true }));
+        assert_eq!(r.svc.state()["idleInhibited"], true);
+        // Already held: no second inhibitor, the state is confirmed.
+        r.call("setIdleInhibit", &[json!(true)]);
+        assert_eq!(r.next_patch(), json!({ "idleInhibited": true }));
+        assert_eq!(r.idle.calls.load(Ordering::SeqCst), 1);
+        r.call("setIdleInhibit", &[json!(false)]);
+        assert_eq!(r.next_patch(), json!({ "idleInhibited": false }));
+        assert!(guard(&r.svc.0.idle).fd.is_none());
+        assert_eq!(r.svc.state()["idleInhibited"], false);
+        r.quiet();
+        assert!(matches!(
+            r.svc.call("setIdleInhibit", &[json!("yes")]),
+            Err(CallError::BadArgs(_))
+        ));
+    }
+
+    #[test]
+    fn keep_awake_survives_a_refusing_logind() {
+        let r = rig(false);
+        r.idle.broken.store(true, Ordering::SeqCst);
+        r.call("setIdleInhibit", &[json!(true)]);
+        assert_eq!(r.next_patch(), json!({ "idleInhibited": false }));
+        assert_eq!(
+            r.next_patch(),
+            json!({ "lastError": "Could not keep the computer awake: Access denied" })
+        );
+        assert_eq!(r.svc.state()["idleInhibited"], false);
+        // The next attempt clears the message and works.
+        r.idle.broken.store(false, Ordering::SeqCst);
+        r.call("setIdleInhibit", &[json!(true)]);
+        assert_eq!(r.next_patch(), json!({ "lastError": "" }));
+        assert_eq!(r.next_patch(), json!({ "idleInhibited": true }));
     }
 
     #[test]
