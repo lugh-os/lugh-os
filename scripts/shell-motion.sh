@@ -12,7 +12,8 @@
 #   MOTION_MS=900 (recorded time)  MOTION_PASSES=3
 #   MOTION_CROP=full  keeps whole frames (default: the region that moves).
 #
-# Names: launcher, controlcenter, notifications, menu, osd, toast, lock.
+# Names: launcher, controlcenter, notifications, menu, osd, toast, lock,
+# overview, customize (these two are recorded full frame).
 # Rendering is the same as scripts/shell-shots.sh (headless nested KWin when
 # kwin_wayland is there, else the software renderer). Needs ImageMagick.
 set -euo pipefail
@@ -36,15 +37,17 @@ read -r -a themes <<<"${MOTION_THEMES:-light dark}"
 ms="${MOTION_MS:-900}"; passes="${MOTION_PASSES:-3}"
 W=1440; H=900
 
-# The part of the 1440×900 scene each motion happens in (WxH+X+Y).
+# The part of the 1440×900 scene each motion happens in (WxH+X+Y). The
+# panel is at the bottom: the quick panel, notification center and OSD open
+# bottom-right, the Lugh menu bottom-left.
 crop_for() {
   [[ "${MOTION_CROP:-}" == full ]] && { echo ""; return; }
   case "$1" in
-    launcher)      echo "800x560+320+0" ;;
-    controlcenter) echo "560x640+880+0" ;;
-    notifications) echo "560x700+440+0" ;;
-    menu)          echo "480x560+0+0" ;;
-    osd)           echo "640x160+400+0" ;;
+    launcher)      echo "800x900+320+0" ;;
+    controlcenter) echo "560x900+880+0" ;;
+    notifications) echo "560x900+880+0" ;;
+    menu)          echo "480x700+0+200" ;;
+    osd)           echo "640x240+800+660" ;;
     toast)         echo "520x360+920+0" ;;
     *)             echo "" ;;
   esac
