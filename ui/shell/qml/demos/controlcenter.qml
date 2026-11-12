@@ -1,5 +1,6 @@
-// Control center demo (1440×900): wallpaper, a status island, and the control
-// center growing out of it.
+// Quick panel demo (1440×900): wallpaper, a stand-in bottom panel with the
+// tray (status icons + clock) at its right end, and the quick panel popping
+// out of the tray, bottom-right, just above the panel.
 //
 //   QT_QPA_PLATFORM=offscreen scripts/qml-shot.sh ui/shell/qml/demos/controlcenter.qml \
 //       /tmp/lugh-shots/cc/wifi-dark.png 1440 900 1500 -- --page wifi --dark
@@ -15,6 +16,18 @@
 //   --wifi-error       failed password attempt on MTN-Fiber-2F
 //   --wifi-off, --no-networks, --scanning, --bt-off, --confirm <logout|restart|shutdown>
 //   --focus            keyboard focus (ring) on the first control
+//   --edit             tile edit mode
+//   --fold             calendar folded to this week (ShellSettings.quickCalendarFolded)
+//   --unfold           calendar unfolded (the saved choice) — the auto-fit may
+//                      still fold it on a short screen
+//   --no-player        no media player
+//   --notifs <n>       keep only the newest n notifications (0 = empty state)
+//   --long-notif       a notification with a very long summary and body
+//   --muted            volume muted
+//   --caffeine         Keep awake on (Services.session.setIdleInhibit)
+//   --tiles <a,b,…>    ShellSettings.quickToggles for this run (not saved:
+//                      the demo restores the user's value on quit)
+//   --12h, --seconds   clock format
 //   --motion <open|drawer|toggle|close> --out <dir>
 //                      grab the scene every ~33 ms into <dir>/<motion>-NN.png
 //                      and log the panel geometry per frame, then quit (pass a
@@ -56,9 +69,42 @@ Item {
         if (flag("--no-networks")) { net.disconnect(); net.networks.clear(); }
         if (flag("--scanning")) net.scanning = true;
         if (flag("--bt-off")) Services.bluetooth.setEnabled(false);
+        // ShellSettings persists: remember the user's values, restore on quit.
+        _saved = { tiles: ShellSettings.quickToggles, h24: ShellSettings.clock24h, sec: ShellSettings.clockShowSeconds,
+                   fold: ShellSettings.quickCalendarFolded };
+        if (flag("--fold")) ShellSettings.quickCalendarFolded = true;
+        if (flag("--unfold")) ShellSettings.quickCalendarFolded = false;
+        if (flag("--no-player")) Services.media.hasPlayer = false;
+        if (flag("--muted")) Services.audio.setMuted(true);
+        if (flag("--caffeine")) Services.session.setIdleInhibit(true);
+        if (flag("--long-notif"))
+            Services.notifications.notify("Calendar", "Quarterly planning review with the regional operations, finance and product teams (rescheduled)",
+                                          "Moved to Thursday 14:00–16:30 in the Nyarutarama boardroom. Please bring the updated forecasts, the hiring plan and the draft budget for the Musanze office; the agenda and dial-in details are attached to the invitation.");
+        if (arg("--notifs", "") !== "") {
+            const h = Services.notifications.history, keep = parseInt(arg("--notifs", "0"));
+            while (h.count > keep) Services.notifications.dismiss(h.get(h.count - 1).nid);
+        }
+        if (arg("--tiles", "") !== "") ShellSettings.quickToggles = arg("--tiles", "").split(",");
+        if (flag("--12h")) ShellSettings.clock24h = false;
+        if (flag("--seconds")) ShellSettings.clockShowSeconds = true;
         configured = true;
         if (motion === "") start.start();
         else settle.start();
+    }
+
+    property var _saved: null
+    function _restore() {
+        if (!_saved) return;
+        ShellSettings.quickToggles = _saved.tiles;
+        ShellSettings.clock24h = _saved.h24;
+        ShellSettings.clockShowSeconds = _saved.sec;
+        ShellSettings.quickCalendarFolded = _saved.fold;
+        _saved = null;
+    }
+    Component.onDestruction: _restore()
+    Connections {
+        target: Qt.application
+        function onAboutToQuit() { demo._restore(); }
     }
 
     function minimal() {
@@ -107,6 +153,7 @@ Item {
         else ShellState.openControlCenter(page);
         cc.forceActiveFocus();
         if (arg("--confirm", "") !== "") { cc.openPage("session", false); cc.sessionConfirm = arg("--confirm", ""); }
+        if (flag("--edit")) cc.setEditing(true);
         if (flag("--focus")) cc.focusFirst();
     }
 
@@ -127,28 +174,50 @@ Item {
         sourceComponent: Wallpaper { _useRepo: true }
     }
 
-    // The status island the panel grows out of.
-    Island {
-        id: island
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.islandSideMargin
-        y: Theme.islandMargin
-        height: Theme.islandHeight
-        active: ShellState.controlCenterOpen
-        text: qsTr("Status")
-        onClicked: ShellState.toggleControlCenter()
+    // Stand-in bottom panel (floating pill) with the tray the quick panel
+    // pops out of.
+    GlassPanel {
+        id: panel
+        x: 8
+        y: demo.height - height - 8
+        width: demo.width - 16
+        height: 48
+        radius: Theme.radiusLg
+        elevation: "menu"
 
-        Icon { anchors.verticalCenter: parent.verticalCenter; name: "wifi"; size: 16 }
-        Icon { anchors.verticalCenter: parent.verticalCenter; name: "volume-1"; size: 16 }
-        Icon { anchors.verticalCenter: parent.verticalCenter; name: "battery-medium"; size: 16 }
-        Text {
+        Island {
+            id: island
+            anchors.right: parent.right
+            anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
-            text: "64%"
-            font: Theme.typeLabelTnum
-            color: Theme.text
+            height: Theme.islandHeight
+            active: ShellState.controlCenterOpen
+            text: qsTr("Quick settings")
+            onClicked: ShellState.toggleControlCenter()
+
+            Icon { anchors.verticalCenter: parent.verticalCenter; name: "wifi"; size: 16 }
+            Icon { anchors.verticalCenter: parent.verticalCenter; name: "volume-1"; size: 16 }
+            Icon { anchors.verticalCenter: parent.verticalCenter; name: "battery-medium"; size: 16 }
+            Column {
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                    anchors.right: parent.right
+                    text: Qt.formatTime(Services.clock.now, ShellSettings.clock24h ? "HH:mm" : "h:mm AP")
+                    font: Theme.typeCaptionTnum
+                    color: Theme.text
+                }
+                Text {
+                    anchors.right: parent.right
+                    text: Services.clock.date
+                    font: Theme.typeCaption
+                    color: Theme.textMuted
+                }
+            }
         }
     }
     Binding { target: ShellState; property: "statusIsland"; value: island.sceneRect }
+    Binding { target: ShellState; property: "panelRect"; value: Qt.rect(panel.x, panel.y, panel.width, panel.height) }
+    Binding { target: ShellState; property: "panelReserved"; value: 60 }
 
     ControlCenter {
         id: cc
