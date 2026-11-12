@@ -1,10 +1,12 @@
-// Notification center + calendar (docs/design/lugh-mode.md §2, §3).
+// Notification center + calendar (Super+N; docs/design/lugh-mode.md §2, §3).
 // Full-screen overlay: the frame anchors this item to the whole screen and
-// maps it while `shown`. A MorphPanel grows out of the center island
-// (ShellState.centerIsland), centered under it (top = island bottom + 6),
-// 340 px wide, at most screen height − 140 tall (never under the dock); the
-// history scrolls inside it. Opens on ShellState.notificationCenterOpen; Esc
-// or a click outside closes it (ShellState.closeAll()).
+// maps it while `shown`. It sits where the quick panel does: bottom-right,
+// right edge on the tray's (ShellState.statusIsland), bottom edge
+// ShellState.panelReserved + 8 px above the screen bottom, 360 px wide, at
+// most up to 16 px from the top; the history scrolls inside it. It pops out
+// of the tray like the quick panel (PopSurface: scale + fade, reduce motion =
+// fade). Opens on ShellState.notificationCenterOpen; Esc or a click outside
+// closes it (ShellState.closeAll()).
 //
 // Content: the long date + week, a compact month calendar, then one slim row
 // ("Notifications" + count, Do Not Disturb, Clear) and the history grouped by
@@ -22,6 +24,7 @@ import QtQuick.Templates as T
 import Lugh.UI
 import Lugh.Shell
 import "notify.js" as N
+import "../controlcenter" as Cc
 
 Item {
     id: root
@@ -30,10 +33,12 @@ Item {
     readonly property bool shown: morph.shown
     readonly property bool wantsKeyboard: open
 
-    readonly property int panelWidth: 340
+    readonly property int panelWidth: 360
     readonly property int pad: Theme.space12
     readonly property int groupLimit: 3
-    readonly property real maxPanelHeight: Math.max(240, height - 140)
+    property int edgeMargin: 10
+    readonly property real restBottom: height - ShellState.panelReserved - 8
+    readonly property real maxPanelHeight: Math.max(240, restBottom - Theme.space16)
     readonly property color cardFill: Theme.dark ? Qt.rgba(1, 1, 1, 0.055) : Qt.rgba(1, 1, 1, 0.55)
 
     // History grouped by app (newest group first); rebuilt when it changes.
@@ -78,18 +83,18 @@ Item {
         onPressed: ShellState.closeAll()
     }
 
-    MorphPanel {
+    Cc.PopSurface {
         id: morph
         anchors.fill: parent
         open: root.open
-        originRect: ShellState.centerIsland
+        origin: Qt.point(ShellState.statusIsland.x + ShellState.statusIsland.width / 2, ShellState.statusIsland.y)
         radius: Theme.radiusXl
         targetRect: {
-            const isl = ShellState.centerIsland;
-            const x = Math.round(isl.x + isl.width / 2 - root.panelWidth / 2);
-            return Qt.rect(Math.max(Theme.islandSideMargin, Math.min(root.width - root.panelWidth - Theme.islandSideMargin, x)),
-                           isl.y + isl.height + 6, root.panelWidth,
-                           Math.min(root.maxPanelHeight, body.item ? body.item.wantedHeight : 320));
+            const isl = ShellState.statusIsland;
+            const want = isl.width > 0 ? isl.x + isl.width - root.panelWidth : root.width - root.edgeMargin - root.panelWidth;
+            const x = Math.max(root.edgeMargin, Math.min(root.width - root.edgeMargin - root.panelWidth, want));
+            const h = Math.round(Math.min(root.maxPanelHeight, body.item ? body.item.wantedHeight : 320));
+            return Qt.rect(Math.round(x), Math.round(root.restBottom - h), root.panelWidth, h);
         }
 
         Accessible.role: Accessible.Pane
