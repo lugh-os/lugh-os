@@ -1,5 +1,6 @@
-// Launcher (Lugh mode, Super+Space): a compact search panel that drops out
-// of the center island (docs/design/lugh-mode.md §2/§3, shell spec §Launcher).
+// Launcher (Lugh mode, Super+Space): a compact search panel centered a
+// little above the middle of the screen, clear of the bottom panel
+// (docs/design/lugh-mode.md §2/§3, shell spec §Launcher).
 //
 //   Launcher { anchors.fill: parent }   // the frame anchors it to the screen
 //
@@ -9,10 +10,19 @@
 // keyboard while `wantsKeyboard`. `query` is the field text; `panelItem` is
 // the glass panel (for frames that draw a backdrop under it).
 //
-// Open-to-typing (NFR-2, ≤ 100 ms): the MorphPanel and its SearchField always
+// Motion: the panel is laid out at its final rect from the first frame and
+// the whole of it (glass, field and body together) scales up and fades in
+// (durMedium; closing durSmall). Opened from the start button
+// (ShellState.launcherFromPanel, when the shell publishes it) it grows out
+// of ShellState.logoIsland's side; otherwise from its own center. Results
+// change only the panel's height, which eases (durSmall) and never moves its
+// top. Reduce motion: fades only. Geometry follows the screen live; nothing
+// animates while the screen is resized.
+//
+// Open-to-typing (NFR-2, ≤ 100 ms): the panel and its SearchField always
 // exist, so the field has focus on the first frame and keys typed during the
-// morph land in it; only the views under the field live in an asynchronous
-// Loader created at startup.
+// opening land in it; only the views under the field live in an asynchronous
+// Loader created at startup (finished synchronously if it is opened first).
 //
 // Results are asynchronous with a live backend: search() returns at once and
 // the model is patched a moment later. `resultsCurrent` says whether the
@@ -31,15 +41,14 @@ FocusScope {
     id: root
 
     readonly property bool open: ShellState.launcherOpen
-    // Open, or still morphing back into the island.
-    readonly property bool shown: open || morph.shown
+    // Open, or still animating out.
+    readonly property bool shown: open || _t > 0
     readonly property bool wantsKeyboard: open
     // The query text (ShowLauncher(query) arrives through Services.shell.pendingQuery).
     property alias query: field.text
-    readonly property Item panelItem: morph._panel
+    readonly property Item panelItem: panel
 
     property int panelWidth: 600
-    property real topFraction: 0.18
     property int maxResultsHeight: 396
 
     // True when Services.launcher.results answers the text in the field.
@@ -53,60 +62,78 @@ FocusScope {
     readonly property int _headerHeight: 48
 
     // ---- geometry -----------------------------------------------------------
-    // The island the panel drops out of (centered when the bar has not
-    // published one yet).
-    readonly property rect _origin: {
-        const c = ShellState.centerIsland;
-        return c.x > 0 ? c : Qt.rect(Math.round((width - c.width) / 2), c.y, c.width, c.height);
-    }
-    readonly property int _panelY: Math.max(Math.round(height * topFraction), _origin.y + _origin.height + Theme.space12)
+    // Everything follows the screen size live. The panel's top stays put
+    // while results change its height: it is placed for its tallest size, a
+    // little above the middle of the space over the bottom panel.
+    readonly property int _availBottom: Math.max(0, height - ShellState.panelReserved - Theme.space16)
+    readonly property int _panelW: Math.max(0, Math.min(panelWidth, width - 2 * Theme.space24))
+    readonly property int _maxBodyHeight: Math.max(136, Math.min(maxResultsHeight,
+        _availBottom - Theme.space24 - _headerHeight - 1))
+    readonly property int _panelY: Math.max(Theme.space16,
+        Math.round((_availBottom - (_headerHeight + 1 + _maxBodyHeight)) * 0.42))
     readonly property real _bodyHeight: body.item ? body.item.targetHeight : 0
-    readonly property rect _wantRect: {
-        const w = Math.max(0, Math.min(panelWidth, width - 2 * Theme.space24));
-        return Qt.rect(Math.round((width - w) / 2), _panelY, w,
-                       _headerHeight + (_bodyHeight > 0 ? _bodyHeight + 1 : 0));
-    }
-    // MorphPanel springs to a new rect, but follows one that changes again
-    // within 100 ms directly (it would snap mid-morph). Changes are therefore
-    // coalesced per event-loop turn (a search rebuilds the model row by row)
-    // and spaced at least 120 ms apart; each one retargets the liquid spring.
-    property double _lastApply: 0
-    function _applyRect(force) {
-        const r = _wantRect, t = morph.targetRect;
-        if (r.x === t.x && r.y === t.y && r.width === t.width && r.height === t.height) return;
-        const wait = 120 - (Date.now() - _lastApply);
-        if (force !== true && morph.shown && wait > 0) {
-            if (!rectTimer.running) { rectTimer.interval = wait; rectTimer.start(); }
-            return;
-        }
-        rectTimer.stop();
-        _lastApply = Date.now();
-        morph.targetRect = r;
-    }
-    on_WantRectChanged: Qt.callLater(_applyRect)
-    Timer { id: rectTimer; onTriggered: root._applyRect() }
+    readonly property real _panelHeight: _headerHeight + (_bodyHeight > 0 ? _bodyHeight + 1 : 0)
+
+    // No Behavior runs while the screen changes size (resolution, rotation,
+    // scale): the layout snaps to the new geometry.
+    property bool _resizing: false
+    onWidthChanged: _geometryChanged()
+    onHeightChanged: _geometryChanged()
+    function _geometryChanged() { _resizing = true; resizeSettle.restart(); }
+    Timer { id: resizeSettle; interval: 200; onTriggered: root._resizing = false }
 
     // ---- open / close ------------------------------------------------------
-    property bool _morphOpen: false
-    onOpenChanged: {
-        if (open) _prepare();
-        else { _enterPending = false; _morphOpen = false; }
-    }
+    // _t: 0 = gone, 1 = open. Scale, offset and opacity of the whole panel
+    // derive from it, so the shape and its content always move as one.
+    property real _t: 0
+    // Where this opening came from (latched, so closing returns the same way).
+    property bool _fromLogo: false
+    property bool _ready: false
+
+    onOpenChanged: if (_ready) { if (open) _show(); else _hide(); }
     Component.onCompleted: {
-        _applyRect(true);
-        if (open) _prepare();
+        _ready = true;
+        if (open) { _prepare(); _t = 1; }
+    }
+
+    function _show() {
+        _prepare();
+        tAnim.stop();
+        tAnim.to = 1;
+        tAnim.duration = Theme.dur(Theme.durMedium);
+        tAnim.easing.bezierCurve = Theme.easeStandard;
+        tAnim.start();
+    }
+    function _hide() {
+        _enterPending = false;
+        tAnim.stop();
+        tAnim.to = 0;
+        tAnim.duration = Theme.dur(Theme.durSmall);
+        tAnim.easing.bezierCurve = Theme.easeStandard;
+        tAnim.start();
+    }
+    NumberAnimation {
+        id: tAnim
+        target: root
+        property: "_t"
+        easing.type: Easing.BezierSpline
     }
 
     function _prepare() {
         _enterPending = false;
+        // Opening: never half-built. A body still loading finishes now.
+        if (body.status === Loader.Loading) body.asynchronous = false;
+        if (_t === 0) {
+            const lg = ShellState.logoIsland;
+            _fromLogo = ("launcherFromPanel" in ShellState) && ShellState.launcherFromPanel === true
+                        && lg.width > 0 && lg.height > 0;
+        }
         const q = Services.shell.pendingQuery;
         if (q !== "") Services.shell.pendingQuery = "";
         if (field.text !== q) field.text = q;      // searches via onTextChanged
         else Services.launcher.search(q);
         field.cursorPosition = field.length;
         if (body.item) body.item.reset();
-        _applyRect(true);
-        _morphOpen = true;
         field.forceActiveFocus(Qt.OtherFocusReason);
         // The frame may make the surface visible after this handler runs;
         // invisible items can't take focus, so retry before the next frame.
@@ -157,11 +184,8 @@ FocusScope {
     Rectangle {
         anchors.fill: parent
         color: Theme.scrim
-        opacity: root.open ? (Theme.dark ? 0.12 : 0.14) : 0
+        opacity: root._t * (Theme.dark ? 0.12 : 0.14)
         visible: opacity > 0
-        Behavior on opacity {
-            NumberAnimation { duration: Theme.reduceMotion ? Theme.durReduced : Theme.durSmall }
-        }
     }
 
     // Outside click closes (the panel swallows its own clicks).
@@ -172,13 +196,56 @@ FocusScope {
         onClicked: ShellState.closeAll()
     }
 
-    MorphPanel {
-        id: morph
-        anchors.fill: parent
-        open: root._morphOpen
-        originRect: root._origin
+    GlassPanel {
+        id: panel
+        x: Math.round((root.width - width) / 2)
+        y: root._panelY
+        width: root._panelW
+        height: root._panelHeight
         radius: Theme.radiusXl
         elevation: "window"
+        // Visible while shown even at _t = 0, so the field can take focus on
+        // the opening turn; opacity keeps it unseen until the first frame.
+        visible: root.shown
+        // Opening reaches full opacity early; closing fades evenly.
+        opacity: Math.min(1, root._t * (root.open ? 1.5 : 1))
+
+        // Results reshape the panel by easing its height only (top fixed).
+        // Not while opening from nothing, resizing, or under reduce motion.
+        Behavior on height {
+            enabled: root.open && root._t > 0 && !root._resizing && !Theme.reduceMotion
+            NumberAnimation {
+                duration: Theme.dur(Theme.durSmall)
+                easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+            }
+        }
+
+        // Grows out of the start button's side (scale pinned to the panel
+        // point nearest the button, drifting from it) or out of its center.
+        readonly property bool _move: !Theme.reduceMotion && !root._resizing
+        readonly property point _pivot: {
+            if (!root._fromLogo) return Qt.point(width / 2, height / 2);
+            const lg = ShellState.logoIsland;
+            const gx = lg.x + lg.width / 2 - x, gy = lg.y + lg.height / 2 - y;
+            return Qt.point(Math.max(0, Math.min(width, gx)), Math.max(0, Math.min(height, gy)));
+        }
+        readonly property real _s: !_move ? 1 : 1 - (1 - root._t) * (root._fromLogo ? 0.12 : 0.05)
+        readonly property real _shiftY: !_move ? 0 : (1 - root._t) * (root._fromLogo ? 28 : 10)
+        transform: [
+            Scale {
+                origin.x: panel._pivot.x
+                origin.y: panel._pivot.y
+                xScale: panel._s
+                yScale: panel._s
+            },
+            Translate { y: panel._shiftY }
+        ]
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onWheel: wheel => { wheel.accepted = true }
+        }
 
         SearchField {
             id: field
@@ -239,8 +306,8 @@ FocusScope {
             visible: root._bodyHeight > 0
         }
 
-        // The body is laid out at its own height at once; the panel (which
-        // clips while it moves) springs after it.
+        // The body is laid out at its own height at once; the panel's height
+        // eases after it and this clip reveals or trims it.
         Item {
             y: root._headerHeight + 1
             width: parent.width
@@ -258,9 +325,7 @@ FocusScope {
                     recent: Services.launcher.recent
                     searching: Services.launcher.searching
                     current: root.resultsCurrent
-                    // Never past the bottom of a short screen.
-                    maxResultsHeight: Math.max(136, Math.min(root.maxResultsHeight,
-                        root.height - root._panelY - root._headerHeight - Theme.space48))
+                    maxResultsHeight: root._maxBodyHeight
                     onActivateResult: (index, secondary) => root._activateResult(index, secondary)
                     onActivateRecent: appId => root._activateRecent(appId)
                 }
