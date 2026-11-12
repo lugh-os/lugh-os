@@ -11,7 +11,8 @@
 //! | `ToggleNotificationCenter()`     | `shell.toggleNotificationCenter()`                     |
 //! | `ToggleLughMenu()`               | `shell.toggleLughMenu()`                               |
 //! | `CloseAll()`                     | `shell.closeAll()`                                     |
-//! | `ShowOverview()`                 | logged ("not in Phase 1"), no error                    |
+//! | `ShowOverview()`                 | `shell.showOverview()` (the UI toggles the overview: Super+Tab opens and closes it) |
+//! | `FocusPanel()`                   | `shell.focusPanel()` (keyboard focus into the panel, Super+B) |
 //! | `ShowOSD(s kind, d value)`       | `osd.requested(kind, value)` after the mapping in [`osd`] |
 //! | `Screenshot(s mode)`             | `area` \| `screen` \| `window`, see [`screenshot`]; the result is a notification |
 //! | `Lock()`                         | `shell.lockRequested()` (the UI forwards it to `Services.session.lock()`) |
@@ -310,9 +311,12 @@ impl Api {
         self.relay("closeAll", vec![]);
     }
 
-    #[allow(clippy::unused_self)]
     fn show_overview(&self) {
-        tracing::info!("ShowOverview: not in Phase 1");
+        self.relay("showOverview", vec![]);
+    }
+
+    fn focus_panel(&self) {
+        self.relay("focusPanel", vec![]);
     }
 
     #[zbus(name = "ShowOSD")]
