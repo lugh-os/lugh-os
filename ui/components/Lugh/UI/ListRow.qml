@@ -16,6 +16,8 @@ import QtQuick.Templates as T
 T.ItemDelegate {
     id: control
 
+    // Screen-reader name; empty = derived from the visible label.
+    property string accessibleName: ""
     property string title: ""
     property string subtitle: ""
     property string iconName: ""
@@ -48,7 +50,7 @@ T.ItemDelegate {
     opacity: enabled ? 1 : Theme.disabledOpacity
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: title
+    Accessible.name: accessibleName !== "" ? accessibleName : title
     Accessible.description: subtitle !== "" ? subtitle : trailingText
     Accessible.selectable: true
     Accessible.selected: selected || highlighted
