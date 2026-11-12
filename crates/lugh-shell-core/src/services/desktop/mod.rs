@@ -156,6 +156,7 @@ struct State {
     v_focus: [String; 3],
     v_toplevels: Vec<TopRow>,
     v_overlap: bool,
+    v_output: String,
     v_installed: Vec<InstalledRow>,
     v_dock: Vec<DockItem>,
     v_recent: Vec<RecentRow>,
@@ -188,6 +189,7 @@ impl State {
             v_focus: Default::default(),
             v_toplevels: Vec::new(),
             v_overlap: false,
+            v_output: String::new(),
             v_installed: Vec::new(),
             v_dock: Vec::new(),
             v_recent: Vec::new(),
@@ -247,6 +249,7 @@ impl State {
             "focusedTitle": self.v_focus[2],
             "toplevels": rows(&self.v_toplevels),
             "dockOverlapped": self.v_overlap,
+            "activeOutput": self.v_output,
         })
     }
 
@@ -307,12 +310,20 @@ impl State {
                 icon: info.map_or_else(|| DEFAULT_ICON.to_owned(), |i| i.1),
                 hay: fold(&format!("{} {name}", t.title)),
             });
+            let at = model::toplevel_geometry(t, self.wm.workspaces(), self.wm.monitors());
             toplevels.push(TopRow {
                 win_id: t.id.as_str().to_owned(),
                 app_id,
                 title: t.title.clone(),
                 workspace: t.workspace.0,
                 focused: t.focused,
+                x: at.x,
+                y: at.y,
+                width: at.width,
+                height: at.height,
+                monitor_width: at.monitor_width,
+                monitor_height: at.monitor_height,
+                monitor: at.monitor,
             });
         }
         if focus != self.v_focus {
@@ -335,6 +346,10 @@ impl State {
         if overlap != self.v_overlap {
             self.v_overlap = overlap;
             patch.insert("dockOverlapped".into(), overlap.into());
+        }
+        if self.wm.active_output() != self.v_output {
+            self.v_output = self.wm.active_output().to_owned();
+            patch.insert("activeOutput".into(), self.v_output.clone().into());
         }
         if !patch.is_empty() {
             sink.patch("wm", Value::Object(patch));
@@ -626,6 +641,25 @@ impl Inner {
                 a.move_to_workspace(&id, ws)?;
             }
             a.activate(&id)
+        })
+    }
+
+    /// Moves a window to a regular workspace without following it (the
+    /// overview's drag and drop).
+    pub(crate) fn move_window_to_workspace(
+        self: &Arc<Self>,
+        win: &str,
+        ws: i64,
+    ) -> Result<(), CallError> {
+        if !(1..=model::MAX_WORKSPACES).contains(&ws) {
+            return Err(CallError::BadArgs(format!("no workspace {ws}")));
+        }
+        let id = WindowId::new(win);
+        if self.state().wm.toplevel(&id).is_none() {
+            return Err(CallError::Failed(format!("no window {win}")));
+        }
+        self.compositor_job("move window to workspace", move |a| {
+            a.move_to_workspace(&id, crate::wm::WorkspaceId(ws))
         })
     }
 
