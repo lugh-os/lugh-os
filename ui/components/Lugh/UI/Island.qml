@@ -14,7 +14,9 @@
 // `padding` left and right; children of different heights center themselves
 // with `anchors.verticalCenter: parent.verticalCenter`. The width follows the
 // content and glides with the liquid spring when the content changes size
-// (`animateWidth`; never on first show, never under reduce motion). Anchor the
+// (`animateWidth`; never under reduce motion, never on first show: the
+// spring arms 150 ms after creation, once fonts, icons and late children
+// have settled the width, so islands never slide open at startup). Anchor the
 // island by an edge or its center and it grows from there.
 //
 // Press = squish, hover = brighten, `active` = held highlight (its panel is
@@ -93,7 +95,12 @@ T.Button {
     onWidthChanged: updateSceneRect()
     onHeightChanged: updateSceneRect()
     onParentChanged: _watch()
-    Component.onCompleted: { _watch(); _ready = true; }
+    Component.onCompleted: { _watch(); _readyTimer.start(); }
+
+    property Timer _readyTimer: Timer {
+        interval: 150
+        onTriggered: control._ready = true
+    }
 
     Keys.onReturnPressed: clicked()
     Keys.onEnterPressed: clicked()
@@ -116,7 +123,7 @@ T.Button {
             color: control.active || control._down ? (Theme.dark ? Qt.rgba(0, 0, 0, 0.22) : Theme.pressedOverlay)
                  : control.interactive && control.hovered ? (Theme.dark ? Qt.rgba(0, 0, 0, 0.12) : Theme.hoverOverlay)
                  : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.durMicro } }
+            Behavior on color { ColorAnimation { duration: Theme.dur(Theme.durMicro) } }
 
             FocusRing { show: control.visualFocus }
         }
