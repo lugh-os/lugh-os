@@ -114,6 +114,9 @@ QtObject {
         property bool canSuspend: true
         property string lastError: ""        // power/logout failures, plain language
         property bool authenticating: false
+        // "Keep awake": an idle inhibitor (logind Inhibit "idle") held by the backend.
+        property bool idleInhibited: false
+        function setIdleInhibit(on) { services._call("session.setIdleInhibit", [on]); idleInhibited = on; }
         property string authError: ""        // plain-language, "" when none
         signal unlocked()
 
@@ -179,13 +182,26 @@ QtObject {
         // (drives dock auto-hide).
         property bool dockOverlapped: false
         property bool available: true   // false ⇒ no compositor connection (dev host, reconnecting)
-        // roles: winId (string), appId, title, workspace (int), focused (bool)
+        // Name of the focused output (Qt screen name, e.g. "eDP-1"); "" when unknown.
+        property string activeOutput: ""
+        // roles: winId (string), appId, title, workspace (int), focused (bool),
+        // x, y, width, height (int, logical px relative to the window's monitor
+        // origin; 0 when unknown), monitorWidth, monitorHeight (int, logical px),
+        // monitor (string, output name of the window's monitor, e.g. "eDP-1"; "" when unknown)
         property ListModel toplevels: ListModel {
-            ListElement { winId: "0x1"; appId: "firefox"; title: "Lugh — Mozilla Firefox"; workspace: 1; focused: true }
-            ListElement { winId: "0x2"; appId: "org.codeberg.dnkl.foot"; title: "amara@lugh-laptop: ~"; workspace: 1; focused: false }
-            ListElement { winId: "0x3"; appId: "vlc"; title: "VLC media player"; workspace: 2; focused: false }
+            ListElement { winId: "0x1"; appId: "firefox"; title: "Lugh — Mozilla Firefox"; workspace: 1; focused: true
+                          x: 120; y: 60; width: 1100; height: 760; monitorWidth: 1920; monitorHeight: 1080; monitor: "eDP-1" }
+            ListElement { winId: "0x2"; appId: "org.codeberg.dnkl.foot"; title: "amara@lugh-laptop: ~"; workspace: 1; focused: false
+                          x: 1060; y: 380; width: 720; height: 460; monitorWidth: 1920; monitorHeight: 1080; monitor: "eDP-1" }
+            ListElement { winId: "0x3"; appId: "vlc"; title: "VLC media player"; workspace: 2; focused: false
+                          x: 360; y: 160; width: 1200; height: 700; monitorWidth: 1920; monitorHeight: 1080; monitor: "eDP-1" }
         }
         function switchWorkspace(wsId) { services._call("wm.switchWorkspace", [wsId]); activeWorkspace = wsId; }
+        // Move a window to another workspace without following it.
+        function moveToWorkspace(winId, wsId) { if (services._call("wm.moveToWorkspace", [winId, wsId])) return;
+            for (let i = 0; i < toplevels.count; ++i)
+                if (toplevels.get(i).winId === winId) toplevels.setProperty(i, "workspace", wsId);
+        }
         function activate(winId) { if (services._call("wm.activate", [winId])) return;
             for (let i = 0; i < toplevels.count; ++i) {
                 const t = toplevels.get(i);
@@ -681,6 +697,10 @@ QtObject {
         function toggleControlCenter() { ShellState.toggleControlCenter(); }
         function toggleNotificationCenter() { ShellState.toggleNotificationCenter(); }
         function toggleLughMenu() { ShellState.toggleLughMenu(); }
+        // space.lugh.Shell1.ShowOverview() (Super+Tab) toggles the workspace overview.
+        function showOverview() { ShellState.toggleOverview(); }
+        // space.lugh.Shell1.FocusPanel() (Super+B): keyboard into the panel.
+        function focusPanel() { ShellState.focusPanel(); }
         function closeAll() { ShellState.closeAll(); }
         // Tells the backend the first frame is on screen (prints the CI marker,
         // emits space.lugh.Shell1.Ready).
