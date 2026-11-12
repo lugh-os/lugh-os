@@ -5,7 +5,8 @@ CPU when idle. This page records how the shell composed by
 `ui/shell/qml/main.qml` is measured, what it measures today and where the
 rest goes.
 
-**Status (2026-11-10, dev host): idle is met, RSS and first frame are not.**
+**Status (2026-11-11, dev host, bottom Panel): idle is met, RSS and first
+frame are not.**
 Both misses are dominated by the platform floor of this host (an empty Qt
 Quick window already costs 104–118 MB and ~400 ms here), so they have to be
 re-measured on the target (trixie, Qt 6.8, the Rust host) before more work is
@@ -25,13 +26,14 @@ LUGH_SHELL_BIN=target/release/lugh-shell scripts/shell-run.sh --nested 10
 live desktop), runs `main.qml` in it with the production environment, lets it
 settle 3 s, watches it idle for the given seconds and prints:
 
-- **first frame**: ms from `exec` to the bar window's first `frameSwapped`
+- **first frame**: ms from `exec` to the panel window's first `frameSwapped`
   (the moment `Services.shell.ready()` is called);
 - **RSS** at idle and peak, split into anonymous / file-backed / shmem, and
   the thread count (`/proc/<pid>/status`);
 - **idle frames**: `main.qml --idle-report <s>` counts `frameSwapped` per
   layer window for `s` seconds once settled
-  (`lugh-shell: idle-frames total=… lugh-bar@…=…`);
+  (`lugh-shell: idle-frames total=… lugh-dock@…=…`; the bottom Panel's
+  window keeps the namespace `lugh-dock`);
 - **idle CPU**: user+system time of the process over the same window;
 - QML warnings (any warning fails the run; `make qml-check` includes it).
 
@@ -53,6 +55,35 @@ range, not a figure. RSS is stable to ±2 MB.
 
 Intel UHD 630 (Mesa), 1440×900, one output, `MALLOC_ARENA_MAX=2`, threaded
 render loop, OpenGL RHI, warm QML disk cache.
+
+### 2026-11-11: the bottom Panel (no top bar, no separate dock)
+
+Load average 10–20 during these runs (eight agents building and rendering),
+so first-frame times are noise; RSS ±2 MB; frames and CPU are exact.
+
+| What | First frame | RSS at idle (anon + file) | Idle frames / CPU |
+|---|---|---|---|
+| **`main.qml`, nothing playing** (`--no-media`), round start | ~1030 ms | 198 MB (75 + 122)¹ | **0 frames, 0 ms CPU in 10 s** |
+| **`main.qml`, nothing playing**, after this round | 1030–3130 ms | **213 MB (92 + 121)** | **0 frames, 0–10 ms CPU in 10 s**² |
+| `main.qml`, mock media playing | ~1080 ms | 214 MB | 15 frames in 5 s, all in `lugh-dock` (MediaBars steps every 320 ms); 30 ms CPU |
+| `main.qml --lazy-overlays` | ~990 ms | 171 MB (53 + 118) | 0 |
+| `main.qml`, two outputs (`LUGH_NESTED_OUTPUTS=2`) | 690–1160 ms | 243 MB (121 + 122), 26 threads | 0 |
+
+¹ At the start of the round Customize failed to compile and was never
+created; it loads now. The +15 MB over that run are the overlays (all created
+eagerly after the first frame): `--lazy-overlays` is 171 MB, i.e. the six
+overlays cost ~40 MB together, up from 12 MB in the round-2 frame. The panel
+itself adds nothing at idle.
+² 1 frame when the clock's minute turns inside the window (the tray
+repaints once a minute).
+
+Idle did not regress: the panel and its tray draw nothing while nothing
+changes (the MediaBars equalizer, the only looping thing in the tray, ticks
+at ~3 fps while music plays and stops otherwise — it was ~57 fps in the top
+bar). Two outputs: before this round every per-screen window of the second
+output was mapped on the first one (see "What the frame does about it").
+
+### 2026-11-10: the round-2 frame (top bar + dock)
 
 | What | First frame | RSS at idle (anon + file) | Idle frames / CPU |
 |---|---|---|---|
@@ -96,8 +127,8 @@ carrying beyond `MALLOC_ARENA_MAX=2`.
 
 ## What the frame does about it
 
-- **Start-up order.** Wallpaper, Bar and Dock are the only surfaces created
-  synchronously. `Services.shell.ready()` fires on the bar's first
+- **Start-up order.** Wallpaper and Panel are the only surfaces created
+  synchronously. `Services.shell.ready()` fires on the panel's first
   `frameSwapped`. Everything else (toasts, launcher, control center,
   notification center, menu, lock) is created afterwards, one surface per
   idle turn, or at once when it is asked for before its turn.
@@ -113,6 +144,11 @@ carrying beyond `MALLOC_ARENA_MAX=2`.
   the preview loads the small pre-blurred file for `Theme.backdrop`.
 - **Input regions at most once per frame** (`LughNative.setInputRegion`),
   so island width animations do not flood the compositor.
+- **Per-screen windows sit at their output's origin** (`x`/`y` =
+  the screen's `virtualX`/`virtualY`). Qt re-assigns a shown window to the
+  screen its geometry lies on, so at (0, 0) the second output's wallpaper and
+  panel went to the first output (seen in the idle report as two
+  `lugh-dock@Virtual-0`).
 - **Low power.** While `Services.shell.lowPower` is true the frame forces
   `Theme.transparency = false` and `Theme.reduceMotion = true` and restores
   the user's own values when it clears (changes the user makes meanwhile are
@@ -154,11 +190,10 @@ Documented options, not defaults:
    `QQuickWindow::setPersistentGraphics(false)` /
    `setPersistentSceneGraph(false)` on overlay windows so their GPU memory is
    released while unmapped.
-4. **The bar renders at ~57 fps for as long as music plays.** `MediaBars` in
-   the center island runs an infinite animation while
-   `Services.media.playing` (288 frames / 5 s, 330–430 ms CPU; every other
-   window 0). Reported to the bar's owner. It should tick at a few fps, or
-   stop when the session is idle or on battery.
+4. **Overlays created eagerly: ~40 MB** (171 MB with `--lazy-overlays`,
+   213 MB without). Customize is the newest and largest; see Open.
+5. ~~The bar renders at ~57 fps while music plays~~: fixed, MediaBars in the
+   panel's tray steps every 320 ms (15 frames / 5 s, 30 ms CPU).
 
 ## Open
 
@@ -167,4 +202,5 @@ Documented options, not defaults:
   `qml6`). The dev host's floor makes the 400 ms / 150 MB verdict unreliable.
 - Decide whether RSS or PSS/anonymous is the budget figure (see 1).
 - Decide whether `--lazy-overlays` becomes the default on low-memory machines
-  (`Services.shell.lowPower`).
+  (`Services.shell.lowPower`), or at least for Customize (opened rarely,
+  ~40 MB for all six overlays now).
