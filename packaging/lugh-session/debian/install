@@ -6,3 +6,8 @@ ui/shell/hypr/lugh usr/share/lugh/hypr/
 ui/shell/hypr/scripts usr/share/lugh/hypr/
 ui/shell/hypr/lugh-portals.conf usr/share/xdg-desktop-portal/
 ui/shell/session/lugh-xdg-terminals.list usr/share/xdg-terminal-exec/
+ui/shell/session/90_lugh-session.gschema.override usr/share/glib-2.0/schemas/
+ui/shell/session/xdg/gtk-3.0 usr/share/lugh/xdg/
+ui/shell/session/xdg/gtk-4.0 usr/share/lugh/xdg/
+ui/shell/session/xdg/foot usr/share/lugh/xdg/
+ui/shell/session/chromium.d/lugh etc/chromium.d/
