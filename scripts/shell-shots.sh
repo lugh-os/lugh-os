@@ -8,6 +8,10 @@
 #   SHOTS_PLATFORM=nested|offscreen forces one.
 #   scripts/shell-shots.sh [out-dir=out/shots] [--width 1440 --height 900 …]
 #   SHOTS_STATES="none lock" SHOTS_THEMES="dark" narrow the set.
+# Every render runs scripts/shell-preview.sh, i.e. on a throwaway config
+# with the default settings (--dark is written into it, so Customize shows
+# "Dark" in the dark shots); the user's lugh-shell.conf is never read or
+# written.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/out/shots}"; [[ $# -gt 0 ]] && shift
@@ -24,7 +28,7 @@ if [[ "$platform" != nested ]]; then
   echo "shell-shots: offscreen (software renderer): rounded glass and shader effects won't show" >&2
 fi
 echo "shell-shots: rendering on $platform into $out"
-read -r -a states <<<"${SHOTS_STATES:-none launcher launcher-query controlcenter controlcenter-wifi controlcenter-sound notifications menu lock osd toast}"
+read -r -a states <<<"${SHOTS_STATES:-none launcher launcher-query controlcenter controlcenter-wifi controlcenter-sound notifications menu lock osd toast overview customize customize-panel}"
 read -r -a themes <<<"${SHOTS_THEMES:-light dark}"
 
 # render <name> <preview args…>
@@ -47,6 +51,7 @@ for theme in "${themes[@]}"; do
     case "$state" in
       launcher-query) a=(--state launcher --query "control panel") ;;
       controlcenter-*) a=(--state controlcenter --page "${state#controlcenter-}") ;;
+      customize-*) a=(--state customize --page "${state#customize-}") ;;
       *) a=(--state "$state") ;;
     esac
     [[ "$theme" == dark ]] && a+=(--dark)
