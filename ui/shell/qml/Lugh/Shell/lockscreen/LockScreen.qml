@@ -18,8 +18,15 @@
 //     usable. Caps Lock shows the same way.
 //   - Idle: `idleTimeout` s without input hides everything but the clock; any
 //     key or pointer movement brings it back. A half-typed password is cleared.
+//   - Lock: the surface fades in over the desktop (durSmall), the clock
+//     fades in and the capsule rises into place (durLarge, eased); under
+//     reduce motion everything only fades.
 //   - Unlock: the scene lifts and fades (durLarge); under reduce motion it
-//     only fades. `shown` stays true until that finishes.
+//     only fades. `shown` stays true until that finishes, and the surface
+//     stays transparent after it (reset on the next lock), so no frame of
+//     the lock screen shows again before the frame unmaps it.
+//   - Resize-safe: the layout follows the screen live and no Behavior
+//     animates while the size changes.
 //   - While shown it swallows every pointer and key event (no click-through,
 //     no shortcut leaks to items behind it).
 //
@@ -60,11 +67,16 @@ FocusScope {
         leaveAnim.stop();
         enterAnim.stop();
         _leaving = false;
-        surface.opacity = 1;
+        // Start values first, so the first mapped frame is already the
+        // first frame of the entrance (never the finished scene, then a jump).
+        const wasShown = _shown;
+        // Locked again mid-unlock: fade back from where the unlock got to.
+        if (!animate) surface.opacity = 1;
+        else if (!wasShown) surface.opacity = 0;
         lift.y = 0;
-        clockGroup.opacity = 1;
-        authGroup.opacity = 1;
-        rise.y = 0;
+        clockGroup.opacity = animate ? 0 : 1;
+        authGroup.opacity = animate ? 0 : 1;
+        rise.y = animate && !Theme.reduceMotion ? 20 : 0;
         idle = false;
         capsule.clear();
         capsule.settle();
@@ -111,6 +123,12 @@ FocusScope {
     }
     // Already locked when the shell starts: everything is in place at once.
     Component.onCompleted: if (session.locked && !_shown) _enter(false)
+
+    // No Behavior runs while the screen changes size: the layout snaps.
+    property bool _resizing: false
+    onWidthChanged: { _resizing = true; resizeSettle.restart(); }
+    onHeightChanged: { _resizing = true; resizeSettle.restart(); }
+    Timer { id: resizeSettle; interval: 200; onTriggered: root._resizing = false }
 
     onIdleChanged: {
         if (idle) capsule.clear();
@@ -200,6 +218,7 @@ FocusScope {
                        ? Math.max(0, Math.round((scene.height - clockGroup.height) / 2 - clockGroup.y - scene.height * 0.04))
                        : 0
                     Behavior on y {
+                        enabled: !root._resizing
                         SpringAnimation {
                             spring: Theme.liquidSpring; damping: Theme.liquidDamping
                             mass: Theme.liquidMass; epsilon: Theme.springEpsilon
@@ -431,10 +450,14 @@ FocusScope {
     }
 
     // ---- animations ------------------------------------------------------------
-    // Locking at run time: the opaque base is there at once (nothing behind
-    // ever shows); the clock fades in and the capsule rises into place.
+    // Locking at run time: the surface (opaque base + wallpaper) fades in
+    // over the desktop; the clock fades in and the capsule rises into place.
     ParallelAnimation {
         id: enterAnim
+        NumberAnimation {
+            target: surface; property: "opacity"; to: 1
+            duration: Theme.dur(Theme.durSmall); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
+        }
         NumberAnimation {
             target: clockGroup; property: "opacity"; from: 0; to: 1
             duration: Theme.dur(Theme.durMedium); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
@@ -443,10 +466,9 @@ FocusScope {
             target: authGroup; property: "opacity"; from: 0; to: 1
             duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
-        SpringAnimation {
-            target: rise; property: "y"; from: Theme.reduceMotion ? 0 : 20; to: 0
-            spring: Theme.liquidSpring; damping: Theme.liquidDamping
-            mass: Theme.liquidMass; epsilon: Theme.springEpsilon
+        NumberAnimation {
+            target: rise; property: "y"; to: 0
+            duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
     }
 
@@ -461,12 +483,12 @@ FocusScope {
             target: lift; property: "y"; to: Theme.reduceMotion ? 0 : -Math.round(root.height * 0.06)
             duration: Theme.dur(Theme.durLarge); easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStandard
         }
+        // The surface stays transparent until the next _enter(): resetting
+        // it here would draw one more frame of the lock before the unmap.
         onFinished: {
             root._leaving = false;
             root._shown = false;
             root.idle = false;
-            surface.opacity = 1;
-            lift.y = 0;
         }
     }
 
