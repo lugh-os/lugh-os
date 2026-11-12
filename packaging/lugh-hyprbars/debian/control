@@ -1,0 +1,35 @@
+Source: lugh-hyprbars
+Section: x11
+Priority: optional
+Maintainer: Lugh Developers <dev@lugh.example>
+Build-Depends: debhelper-compat (= 13),
+               hyprland,
+               hyprland-dev (>= 0.55.2),
+               hyprland-dev (<< 0.55.3~),
+               libdrm-dev,
+               libinput-dev,
+               liblua5.4-dev,
+               libpixman-1-dev,
+               libudev-dev,
+               libwayland-dev,
+               libxkbcommon-dev,
+               pkgconf
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/hyprwm/hyprland-plugins
+
+Package: lugh-hyprbars
+Architecture: any
+Depends: hyprland (= ${hyprland:Version}), ${shlibs:Depends}, ${misc:Depends}
+Recommends: fonts-inter
+Description: Lugh title bars for Hyprland windows without their own
+ The hyprbars plugin from hyprland-plugins, built for the exact Hyprland
+ version in the archive and patched for Lugh: it draws a compact title bar
+ (minimize, maximize, close on the right) only on windows that rely on the
+ compositor for their frame (foot, kitty, mpv, Qt apps, X11 apps), and
+ lets windows that asked for client-side decorations draw their own.
+ .
+ Loaded and styled by the Lugh session
+ (/usr/share/lugh/hypr/lugh/titlebars.lua). Hyprland plugins must match the
+ compositor build exactly, so this package depends on one Hyprland version
+ and is rebuilt with every Hyprland update.
