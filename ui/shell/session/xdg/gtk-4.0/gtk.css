@@ -1,0 +1,28 @@
+/* Lugh: compact title bars, one window shape (GTK 4 and libadwaita).
+ *
+ * System-wide file: /usr/share/lugh/xdg/gtk-4.0/gtk.css. GTK reads gtk.css
+ * only from the user's config dir, so lugh-session adds
+ *   @import url("file:///usr/share/lugh/xdg/gtk-4.0/gtk.css");
+ * at the top of ~/.config/gtk-4.0/gtk.css once (never overwriting it).
+ *
+ * Hyprland draws the rounded corners (14 px) and the shadow of every window,
+ * so the client-side shadow is removed: otherwise a second shape shows behind
+ * the window. Resizing from the edges is Hyprland's (resize_on_border). */
+
+window.csd,
+window.csd:backdrop {
+  box-shadow: none;
+  margin: 0;
+}
+
+/* Compact header bars (Adwaita: 47 px). */
+headerbar {
+  min-height: 38px;
+}
+
+/* Window buttons: small, right side (gtk-decoration-layout). */
+windowcontrols button {
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+}
