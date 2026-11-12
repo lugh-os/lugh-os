@@ -10,5 +10,8 @@ upower
 hyprsunset
 libnotify-bin
 libglib2.0-bin
+# gsettings writes (theme, title-bar button layout) persist through dconf.
+dconf-gsettings-backend
+gsettings-desktop-schemas
 xdg-user-dirs
 sysstat
